@@ -41,4 +41,8 @@ O analista de mercado é um caminho adicional e não depende de uma estratégia 
 
 ## Extensão futura
 
+### Ciclo de vida do Connector v1
+
+Cada terminal roda em um worker independente. O processo principal envia operações permitidas por pipe privado, com ID sequencial e timeout. A requisição v1 contém ID, nome permitido da operação, argumentos e opções; a resposta contém o mesmo ID, indicador de sucesso e resultado ou erro. Os estados publicados são disconnected, connecting, ready, degraded e error. Heartbeats consultam terminal, conta e fingerprint login@servidor; a mudança de identidade desarma ambos os motores no worker. Desconexões do broker deixam o worker ativo para a retentativa existente do adapter. Queda ou timeout fatal encerra o worker e agenda reinício com backoff exponencial limitado. Uma resposta de ordem perdida é tratada como desconhecida, sem repetição automática.
+
 Antes de tratar outra regra ou a operação REAL como homologada: definir contrato declarativo, replicação/backtest reproduzível, especificação por broker/símbolo, validação de custos e testes forward demo, reconciliação e recuperação de falhas, limites de risco aprovados, telemetria e revisão operacional independente. O caminho REAL já existe no código e exige confirmação explícita; essa capacidade não substitui esses critérios.

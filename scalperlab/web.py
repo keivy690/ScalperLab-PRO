@@ -326,8 +326,7 @@ def create_app(*, database: Database | None = None, mt5: MT5Gateway | None = Non
             result["ok"] = False
             result["status"] = "partial"
             result["detail"] = "O fechamento foi processado, mas o motor não confirmou a parada. Verifique o estado antes de retomar operações."
-            gateway.emergency_action = {**gateway.emergency_action, "status": "partial",
-                                        "detail": result["detail"]}
+            gateway.update_emergency_action(status="partial", detail=result["detail"])
         app.extensions["scalper_db"].add_log("CRITICAL" if result["ok"] else "WARN", result["detail"])
         return jsonify(result), (200 if result["ok"] else 409)
 

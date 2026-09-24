@@ -7,8 +7,9 @@ from pathlib import Path
 from typing import Callable
 
 from ..config import data_directory
+from ..trading.ports import ConnectorV1
 from .discovery import discover_mt5_terminals
-from .mt5 import MT5Connector
+from .process import ProcessMT5Connector
 
 
 @dataclass(slots=True)
@@ -30,14 +31,12 @@ class ConnectorManager:
     """Owns terminal configurations and one lazy connector per terminal ID."""
 
     def __init__(self, config_path: Path | None = None,
-                 connector_factory: Callable[[TerminalConfig], MT5Connector] | None = None) -> None:
+                 connector_factory: Callable[[TerminalConfig], ConnectorV1] | None = None) -> None:
         self.config_path = config_path or (data_directory() / "terminals.json")
         self.connector_factory = connector_factory or (
-            lambda config: MT5Connector(terminal_id=config.terminal_id,
-                                        terminal_path=config.path,
-                                        symbol_mappings=config.symbol_mappings))
+            lambda config: ProcessMT5Connector(config))
         self._configs: dict[str, TerminalConfig] = {}
-        self._connectors: dict[str, MT5Connector] = {}
+        self._connectors: dict[str, ConnectorV1] = {}
         self._load()
         if not self._configs:
             default_config = TerminalConfig(terminal_id="default", name="Terminal padrão")
@@ -98,7 +97,7 @@ class ConnectorManager:
         self._save()
         return config
 
-    def get_connector(self, terminal_id: str = "default") -> MT5Connector:
+    def get_connector(self, terminal_id: str = "default") -> ConnectorV1:
         config = self._configs.get(terminal_id)
         if config is None or not config.enabled:
             raise KeyError(f"Terminal inexistente ou desativado: {terminal_id}")

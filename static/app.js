@@ -67,12 +67,22 @@
   function renderConnection(mt5) {
     const connected = Boolean(mt5?.connected);
     const account = mt5?.account;
+    const connector = mt5?.connector;
+    const lifecycleLabels = {
+      disconnected: "Conector desconectado",
+      connecting: "Iniciando conector MT5",
+      degraded: "MT5 reconectando",
+      error: "Falha no conector MT5",
+    };
     const dotClass = connected ? "state-dot" : "state-dot muted";
     $("#mini-terminal-state").className = dotClass;
     $("#runtime-dot").className = dotClass;
     $("#runtime-label").textContent = connected ? `Terminal MT5 ${account.mode === "DEMO" ? "DEMO" : "REAL"} conectado` : "Aguardando conexão MT5";
     $("#header-server").textContent = account?.server || "Servidor indisponível";
-    $("#mini-terminal-label").textContent = connected ? "Terminal conectado" : (mt5?.detail || "Aguardando conexão");
+    $("#mini-terminal-label").textContent = connector?.identity_changed
+      ? "Conta mudou; motores desarmados"
+      : connected ? "Terminal conectado"
+        : lifecycleLabels[connector?.lifecycle] || mt5?.detail || "Aguardando conexão";
     $("#mini-server").textContent = account?.server || "—";
     $("#mini-login").textContent = account?.login || "—";
     $("#footer-data-status").textContent = connected ? `Conta ${account.mode}` : "Sem conexão";

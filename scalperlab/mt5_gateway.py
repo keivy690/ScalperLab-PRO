@@ -82,6 +82,14 @@ class MT5Gateway:
                 self._engine_armed_mode = None
                 self._engine_armed_fingerprint = None
 
+    def set_emergency_action(self, action: dict[str, Any]) -> None:
+        with self._lock:
+            self.emergency_action = dict(action)
+
+    def update_emergency_action(self, **updates: Any) -> None:
+        with self._lock:
+            self.emergency_action = {**self.emergency_action, **updates}
+
     def _connect(self):
         with self._lock:
             mt5 = self._module()

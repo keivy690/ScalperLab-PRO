@@ -46,7 +46,7 @@ def run_desktop() -> None:
             if analyst is not None:
                 analyst.shutdown()
             if app is not None:
-                app.extensions["scalper_mt5"].shutdown()
+                app.extensions["scalper_connector_manager"].shutdown()
             if server is not None:
                 server.shutdown()
             if thread is not None:

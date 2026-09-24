@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from scalperlab.connectors.manager import ConnectorManager, TerminalConfig
+from scalperlab.mt5_gateway import MT5Gateway
 from scalperlab.trading.models import Symbol
 from scalperlab.trading.ports import ConnectorV1
 
@@ -51,7 +52,9 @@ class TradingAbstractionTests(unittest.TestCase):
 
     def test_available_and_market_watch_sets_are_explicitly_separate(self):
         with tempfile.TemporaryDirectory() as directory:
-            manager = ConnectorManager(config_path=Path(directory) / "terminals.json")
+            manager = ConnectorManager(
+                config_path=Path(directory) / "terminals.json",
+                connector_factory=lambda config: MT5Gateway(terminal_id=config.terminal_id))
             connector = manager.get_connector()
             self.assertIsInstance(connector, ConnectorV1)
             connector._connect = lambda: SimpleNamespace(symbols_get=lambda: [
