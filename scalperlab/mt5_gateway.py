@@ -755,6 +755,13 @@ class MT5Gateway:
             return {"ok": False, "detail": "Não foi possível consultar posições existentes; teste cancelado."}
         if existing:
             return {"ok": False, "detail": "Há posições abertas na conta. O teste foi cancelado para não interferir nelas."}
+        existing_orders = mt5.orders_get()
+        if existing_orders is None:
+            return {"ok": False,
+                    "detail": "Não foi possível consultar ordens pendentes; teste cancelado."}
+        if existing_orders:
+            return {"ok": False,
+                    "detail": "Há ordens pendentes na conta. O teste foi cancelado para não interferir nelas."}
 
         symbols = mt5.symbols_get(group="*EURUSD*") or []
         tradable = [item for item in symbols
@@ -791,13 +798,19 @@ class MT5Gateway:
         final_positions = mt5.positions_get()
         if final_positions is None or final_positions:
             return {"ok": False, "blocked": True, "detail": "Posições mudaram durante a validação; teste cancelado."}
+        final_orders = mt5.orders_get()
+        if final_orders is None or final_orders:
+            return {"ok": False, "blocked": True,
+                    "detail": "Ordens pendentes mudaram durante a validação; teste cancelado."}
         try:
             opened = mt5.order_send(request)
         except Exception as exc:
-            return {"ok": False, "unknown": True,
+            return {"ok": False, "unknown": True, "position_may_remain": True,
+                    "no_retry": True,
                     "detail": f"Resultado da ordem de teste desconhecido ({type(exc).__name__}); consulte o terminal antes de qualquer nova tentativa."}
         if opened is None:
-            return {"ok": False, "unknown": True,
+            return {"ok": False, "unknown": True, "position_may_remain": True,
+                    "no_retry": True,
                     "detail": f"O terminal não confirmou a ordem ({mt5.last_error()}); consulte posições/histórico, sem reenviar."}
         accepted = {getattr(mt5, "TRADE_RETCODE_DONE", 10009), getattr(mt5, "TRADE_RETCODE_DONE_PARTIAL", 10010)}
         if opened.retcode not in accepted:

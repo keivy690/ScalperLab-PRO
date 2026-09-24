@@ -117,6 +117,40 @@ class ConnectorProcessTests(unittest.TestCase):
         finally:
             connector.shutdown()
 
+    def test_trade_rpc_has_longer_timeout_and_timeout_is_non_retryable_unknown(self):
+        class FakePipe:
+            def __init__(self):
+                self.timeout = None
+            def send(self, _message): pass
+            def poll(self, timeout):
+                self.timeout = timeout
+                return False
+            def close(self): pass
+
+        class FakeWorker:
+            def __init__(self):
+                self.alive = True
+            def is_alive(self): return self.alive
+            def terminate(self): self.alive = False
+            def join(self, timeout=None): pass
+            def close(self): pass
+
+        connector = ProcessMT5Connector(
+            TerminalConfig(terminal_id="timeout"), start_immediately=False,
+            rpc_timeout=1.0, trade_rpc_timeout=30.0)
+        pipe = FakePipe()
+        connector._process = FakeWorker()
+        connector._connection = pipe
+        try:
+            result = connector.place_demo_smoke_order("ENVIAR TESTE DEMO")
+            self.assertEqual(pipe.timeout, 30.0)
+            self.assertFalse(result["ok"])
+            self.assertTrue(result["unknown"])
+            self.assertTrue(result["no_retry"])
+            self.assertTrue(result["position_may_remain"])
+        finally:
+            connector.shutdown()
+
     def test_two_terminal_ids_run_in_separate_worker_processes(self):
         with tempfile.TemporaryDirectory() as directory:
             manager = ConnectorManager(

@@ -33,6 +33,7 @@ class FakeMT5:
         self.initialize_count = 0
         self.account_login = 42
         self.account_server = "Demo"
+        self.pending_orders = []
         self.order_check_hook = None
         self.test_symbol = SimpleNamespace(name="EURUSD#", trade_mode=4, order_mode=127,
                                            volume_min=0.01, filling_mode=2)
@@ -57,7 +58,7 @@ class FakeMT5:
         if symbol is not None:
             rows = [position for position in rows if position.symbol == symbol]
         return rows
-    def orders_get(self): return []
+    def orders_get(self): return list(self.pending_orders)
     def order_calc_profit(self, *_args): return -1.0
     def order_calc_margin(self, *_args): return 10.0
     def symbol_info_tick(self, _symbol): return SimpleNamespace(ask=1.082, bid=1.081)
@@ -148,6 +149,80 @@ class MT5GatewayTests(unittest.TestCase):
         result = gateway.place_demo_smoke_order("ENVIAR TESTE DEMO")
         self.assertFalse(result["ok"])
         self.assertEqual(mt5.sent, 0)
+
+    def test_demo_smoke_order_refuses_to_touch_pending_orders(self):
+        mt5 = FakeMT5()
+        mt5.positions = []
+        mt5.pending_orders = [SimpleNamespace(ticket=13)]
+        result = MT5Gateway(mt5).place_demo_smoke_order("ENVIAR TESTE DEMO")
+        self.assertFalse(result["ok"])
+        self.assertEqual(mt5.sent, 0)
+
+    def test_demo_smoke_order_check_rejection_never_sends(self):
+        mt5 = FakeMT5()
+        mt5.positions = []
+        mt5.order_check = lambda _request: SimpleNamespace(retcode=10013)
+        result = MT5Gateway(mt5).place_demo_smoke_order("ENVIAR TESTE DEMO")
+        self.assertFalse(result["ok"])
+        self.assertFalse(result.get("unknown", False))
+        self.assertEqual(mt5.sent, 0)
+        self.assertEqual(mt5.positions, [])
+
+    def test_demo_smoke_order_send_exception_is_unknown_and_never_retried(self):
+        mt5 = FakeMT5()
+        mt5.positions = []
+
+        def ambiguous_send(_request):
+            mt5.sent += 1
+            mt5.positions.append(SimpleNamespace(ticket=99, symbol="EURUSD#", type=0, volume=0.01,
+                                                  price_open=1.1, price_current=1.1, sl=0, tp=0,
+                                                  profit=0, time=1, magic=209221001,
+                                                  comment="SL1 demo test"))
+            raise TimeoutError("simulated response loss after acceptance")
+
+        mt5.order_send = ambiguous_send
+        result = MT5Gateway(mt5).place_demo_smoke_order("ENVIAR TESTE DEMO")
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["unknown"])
+        self.assertTrue(result["position_may_remain"])
+        self.assertTrue(result["no_retry"])
+        self.assertEqual(mt5.sent, 1)
+        self.assertEqual(len(mt5.positions), 1)
+
+    def test_demo_smoke_order_accepted_without_identified_position_stays_unknown(self):
+        mt5 = FakeMT5()
+        mt5.positions = []
+
+        def accepted_but_not_reconciled(request):
+            mt5.sent += 1
+            return SimpleNamespace(retcode=mt5.TRADE_RETCODE_DONE, order=99, deal=100)
+
+        mt5.order_send = accepted_but_not_reconciled
+        result = MT5Gateway(mt5).place_demo_smoke_order("ENVIAR TESTE DEMO")
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["unknown"])
+        self.assertTrue(result["position_may_remain"])
+        self.assertEqual(mt5.sent, 1)
+
+    def test_demo_smoke_order_partial_close_reports_remaining_exposure_without_retry(self):
+        mt5 = FakeMT5()
+        mt5.positions = []
+        original_send = mt5.order_send
+
+        def partial_close(request):
+            if request.get("position") == 99:
+                mt5.sent += 1
+                return SimpleNamespace(retcode=mt5.TRADE_RETCODE_DONE_PARTIAL, order=22, deal=23)
+            return original_send(request)
+
+        mt5.order_send = partial_close
+        result = MT5Gateway(mt5).place_demo_smoke_order("ENVIAR TESTE DEMO")
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["close"]["partial"])
+        self.assertTrue(result["position_remains"])
+        self.assertTrue(result["no_retry"])
+        self.assertEqual(mt5.sent, 2)
+        self.assertEqual([position.ticket for position in mt5.positions], [99])
 
     def test_engine_strategy_order_requires_arm_demo_and_empty_account(self):
         mt5 = FakeMT5()

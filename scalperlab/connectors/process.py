@@ -45,6 +45,13 @@ _REMOTE_METHODS = {
     "set_emergency_action", "update_emergency_action",
 }
 
+_TRADE_ACTION_METHODS = {
+    "submit_order", "send_demo_strategy_order", "send_real_strategy_order",
+    "send_demo_analyst_order", "send_real_analyst_order",
+    "place_demo_smoke_order", "close_demo_position", "close_real_position",
+    "emergency_stop_demo", "emergency_stop_real",
+}
+
 
 def _connector_worker(connection: Connection, config: Any,
                       connector_factory: Callable[[Any], Any] | None) -> None:
@@ -89,6 +96,7 @@ class ProcessMT5Connector:
 
     def __init__(self, config: Any, connector_factory: Callable[[Any], Any] | None = None, *,
                  heartbeat_interval: float = 5.0, rpc_timeout: float = 4.0,
+                 trade_rpc_timeout: float = 30.0,
                  restart_delay: float = 1.0, max_restart_delay: float = 30.0,
                  start_immediately: bool = True) -> None:
         self.terminal_id = config.terminal_id
@@ -96,6 +104,7 @@ class ProcessMT5Connector:
         self._factory = connector_factory
         self._heartbeat_interval = max(0.05, heartbeat_interval)
         self._rpc_timeout = max(0.05, rpc_timeout)
+        self._trade_rpc_timeout = max(self._rpc_timeout, trade_rpc_timeout)
         self._restart_delay = max(0.05, restart_delay)
         self._max_restart_delay = max(self._restart_delay, max_restart_delay)
         self._ctx = multiprocessing.get_context("spawn")
@@ -194,7 +203,9 @@ class ProcessMT5Connector:
             request_id = self._request_id
             try:
                 self._connection.send((request_id, method, args, kwargs))
-                if not self._connection.poll(self._rpc_timeout):
+                timeout = (self._trade_rpc_timeout if method in _TRADE_ACTION_METHODS
+                           else self._rpc_timeout)
+                if not self._connection.poll(timeout):
                     self._mark_failure(f"Timeout ao aguardar resposta do conector ({method}).")
                     self._terminate_worker()
                     return False, self._last_error
@@ -239,9 +250,15 @@ class ProcessMT5Connector:
     def health(self) -> ConnectorHealth:
         with self._health_lock:
             process = self._process
+            try:
+                worker_pid = process.pid if process and process.is_alive() else None
+            except (AssertionError, ValueError):
+                # A dead multiprocessing handle may be closed concurrently while
+                # the transport is being replaced after a worker failure.
+                worker_pid = None
             return ConnectorHealth(
                 self.terminal_id, self._lifecycle,
-                process.pid if process and process.is_alive() else None,
+                worker_pid,
                 self._last_heartbeat, self._last_error, self._account_fingerprint,
                 self._identity_changed, self._restart_count)
 
@@ -302,7 +319,8 @@ class ProcessMT5Connector:
 
     def submit_order(self, order: dict[str, Any]) -> dict[str, Any]:
         ok, result = self._rpc("submit_order", order)
-        return result if ok else {"ok": False, "unknown": True, "detail": result}
+        return result if ok else {"ok": False, "unknown": True, "no_retry": True,
+                                  "position_may_remain": True, "detail": result}
 
     def set_emergency_action(self, action: dict[str, Any]) -> None:
         ok, _result = self._rpc("set_emergency_action", action)
@@ -334,7 +352,10 @@ class ProcessMT5Connector:
                 return False
             if name == "disarm_order_engine":
                 return None
-            return {"ok": False, "unknown": True, "detail": result}
+            failed = {"ok": False, "unknown": True, "detail": result}
+            if name in _TRADE_ACTION_METHODS:
+                failed.update(no_retry=True, position_may_remain=True)
+            return failed
         return call
 
     def shutdown(self) -> None:
