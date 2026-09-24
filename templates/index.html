@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="app-token" content="__APP_TOKEN__">
+  <meta name="theme-color" content="#131315">
+  <title>ScalperLab PRO</title>
+  <link rel="icon" type="image/png" href="/static/brand/scalperlab-pro-mark.png">
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+<svg class="icon-sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <symbol id="icon-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></symbol>
+  <symbol id="icon-strategy" viewBox="0 0 24 24"><path d="M4 19h16M6 16l4-4 3 2 5-7"/><circle cx="6" cy="16" r="1"/><circle cx="10" cy="12" r="1"/><circle cx="13" cy="14" r="1"/><circle cx="18" cy="7" r="1"/></symbol>
+  <symbol id="icon-search" viewBox="0 0 24 24"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 4.5 4.5"/></symbol>
+  <symbol id="icon-arrows" viewBox="0 0 24 24"><path d="M4 7h15l-3-3M20 17H5l3 3"/></symbol>
+  <symbol id="icon-shield" viewBox="0 0 24 24"><path d="M12 3 20 6v5c0 5.2-3.4 8.4-8 10-4.6-1.6-8-4.8-8-10V6l8-3Z"/><path d="m9 12 2 2 4-4"/></symbol>
+  <symbol id="icon-settings" viewBox="0 0 24 24"><path d="M4 7h9m4 0h3M4 17h3m4 0h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></symbol>
+  <symbol id="icon-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+  <symbol id="icon-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
+  <symbol id="icon-refresh" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M5.6 9a7 7 0 0 1 11.8-2L20 12M4 12l2.6 5a7 7 0 0 0 11.8-2"/></symbol>
+  <symbol id="icon-wallet" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="15" rx="2"/><path d="M3 9h18M16 14h2"/><path d="M6 5V3h12v2"/></symbol>
+  <symbol id="icon-chart" viewBox="0 0 24 24"><path d="M4 19V5M4 19h17"/><path d="m7 15 4-4 3 2 6-7"/></symbol>
+  <symbol id="icon-terminal" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3m6 0h4"/></symbol>
+  <symbol id="icon-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="icon-power" viewBox="0 0 24 24"><path d="M12 3v9"/><path d="M7 6.8a8 8 0 1 0 10 0"/></symbol>
+  <symbol id="icon-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5m0-8h.01"/></symbol>
+  <symbol id="icon-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+  <symbol id="icon-activity" viewBox="0 0 24 24"><path d="M3 12h4l3-7 4 14 3-7h4"/></symbol>
+  <symbol id="icon-code" viewBox="0 0 24 24"><path d="m8 8-4 4 4 4m8-8 4 4-4 4m-3-11-2 14"/></symbol>
+</svg>
+<div class="app-shell">
+  <aside class="sidebar" aria-label="Navegação principal">
+    <div class="brand-row"><img class="brand-logo" src="/static/brand/scalperlab-pro-mark.png" alt=""><div><strong>ScalperLab <span class="brand-pro">PRO</span></strong></div></div>
+    <div class="side-label">MÓDULOS</div>
+    <nav class="side-nav">
+      <button class="nav-item active" data-view="dashboard"><span><svg class="icon"><use href="#icon-grid"/></svg></span><b>Painel principal</b></button>
+      <button class="nav-item" data-view="strategies"><span><svg class="icon"><use href="#icon-strategy"/></svg></span><b>Estratégias</b><i id="strategy-nav-count">0</i></button>
+      <button class="nav-item" data-view="research"><span><svg class="icon"><use href="#icon-search"/></svg></span><b>Pesquisa de fontes</b></button>
+      <button class="nav-item" data-view="orders"><span><svg class="icon"><use href="#icon-arrows"/></svg></span><b>Ordens e posições</b></button>
+      <button class="nav-item" data-view="risk"><span><svg class="icon"><use href="#icon-shield"/></svg></span><b>Risco e segurança</b></button>
+      <button class="nav-item" data-view="settings"><span><svg class="icon"><use href="#icon-settings"/></svg></span><b>Configurações</b></button>
+    </nav>
+    <div class="sidebar-spacer"></div>
+    <div class="terminal-mini panel">
+      <div class="mini-heading"><span>TERMINAL MT5</span><span id="mini-terminal-state" class="state-dot muted" aria-label="Estado do terminal"></span></div>
+      <div class="mini-state" id="mini-terminal-label">Aguardando conexão</div>
+      <div class="mini-values"><div><small>SERVIDOR</small><strong id="mini-server">—</strong></div><div><small>CONTA</small><strong id="mini-login">—</strong></div></div>
+    </div>
+    <button id="sidebar-emergency" class="sidebar-emergency"><svg class="icon"><use href="#icon-power"/></svg> <span id="sidebar-emergency-label">PARADA DE EMERGÊNCIA</span></button>
+    <div class="sidebar-foot"><span class="state-dot muted" aria-hidden="true"></span> REAL exige armamento explícito</div>
+  </aside>
+
+  <main class="workspace">
+    <div class="statusbar">
+      <div class="runtime-status"><span class="state-dot muted" id="runtime-dot" aria-hidden="true"></span><strong id="runtime-label">Aguardando conexão MT5</strong><span class="runtime-separator">|</span><span class="runtime-detail">Ordens REAL exigem confirmação em cada início</span></div>
+      <div class="statusbar-meta"><span>SALDO</span><strong id="header-balance">—</strong><span class="statusbar-divider"></span><span id="header-server">Servidor indisponível</span><button class="icon-button statusbar-refresh" id="refresh-button" title="Atualizar dados" aria-label="Atualizar dados"><svg class="icon"><use href="#icon-refresh"/></svg></button></div>
+    </div>
+
+    <section class="view active" id="view-dashboard">
+      <div class="kpi-grid">
+        <article class="kpi-card panel"><div class="kpi-head"><span>Saldo da conta</span><span class="kpi-icon blue"><svg class="icon"><use href="#icon-wallet"/></svg></span></div><strong class="kpi-value" id="kpi-balance">—</strong><small id="kpi-currency">Aguardando MT5</small></article>
+        <article class="kpi-card panel"><div class="kpi-head"><span>Resultado flutuante</span><span class="kpi-icon green"><svg class="icon"><use href="#icon-chart"/></svg></span></div><strong class="kpi-value" id="kpi-profit">—</strong><small id="kpi-equity">Patrimônio —</small></article>
+        <article class="kpi-card panel"><div class="kpi-head"><span>Posições abertas</span><span class="kpi-icon cyan"><svg class="icon"><use href="#icon-arrows"/></svg></span></div><strong class="kpi-value" id="kpi-positions">—</strong><small id="kpi-orders-detail">Consulta MT5 indisponível</small></article>
+        <article class="kpi-card panel"><div class="kpi-head"><span>Estado operacional</span><span class="kpi-icon red"><svg class="icon"><use href="#icon-shield"/></svg></span></div><strong class="kpi-value" id="kpi-risk">Protegido</strong><small id="kpi-risk-detail">REAL exige confirmação explícita</small></article>
+      </div>
+
+      <div class="content-grid">
+        <div class="primary-column">
+          <section class="panel section-panel analyst-dashboard-panel">
+            <div class="section-heading"><div class="heading-title"><span class="section-icon cyan"><svg class="icon"><use href="#icon-activity"/></svg></span><div><h2>Análise contínua de mercado</h2><p id="dashboard-analyst-caption">Leituras técnica, quantitativa e fundamental dos ativos monitorados</p></div><span id="dashboard-analyst-count" class="count-chip">0 ativos</span></div><div class="heading-actions"><span id="dashboard-analyst-status" class="status-chip">PARADO</span><button class="button secondary" data-view="risk">Ver análise completa</button></div></div>
+            <div id="dashboard-analyst-results" class="analysis-grid"><div class="empty-card">Configure os ativos e inicie o Analista em Risco e segurança para exibir as leituras aqui.</div></div>
+          </section>
+          <section class="panel section-panel">
+            <div class="section-heading"><div class="heading-title"><span class="section-icon blue"><svg class="icon"><use href="#icon-strategy"/></svg></span><div><h2>Estratégias cadastradas</h2><p>Resumo do catálogo · revisão humana antes de qualquer uso</p></div><span class="count-chip" id="strategy-count">0 estratégias</span></div><div class="heading-actions"><button class="button secondary" data-view="strategies">Ver catálogo</button><button class="button primary" data-action="new-strategy"><svg class="icon"><use href="#icon-plus"/></svg> Nova estratégia</button></div></div>
+            <div class="strategy-grid strategy-summary-grid" id="dashboard-strategies"><div class="empty-card">Nenhuma estratégia cadastrada. Crie uma descrição ou importe um arquivo .mq5, .py ou .txt.</div></div>
+          </section>
+          <section class="panel section-panel orders-panel">
+            <div class="section-heading"><div class="heading-title"><span class="section-icon green"><svg class="icon"><use href="#icon-arrows"/></svg></span><div><h2>Monitor de posições abertas</h2><p id="orders-caption">Dados consultados diretamente do MT5</p></div><span class="count-chip green-chip" id="position-count">— posições</span></div><div class="inline-total"><span>Lucro flutuante</span><strong id="orders-profit">—</strong><button class="icon-button" data-action="refresh" title="Atualizar posições"><svg class="icon"><use href="#icon-refresh"/></svg></button></div></div>
+            <div class="table-wrap"><table><thead><tr><th>Ticket</th><th>Ativo</th><th>Tipo</th><th class="right">Lote</th><th class="right">Entrada</th><th class="right">Atual</th><th class="right">S/L</th><th class="right">T/P</th><th class="right">Lucro/Prejuízo</th><th></th></tr></thead><tbody id="dashboard-orders"><tr><td colspan="10" class="empty-cell">Conecte o terminal MT5 para consultar posições.</td></tr></tbody></table></div>
+          </section>
+          <section class="panel activity-panel hidden"><div class="section-heading compact"><div class="heading-title"><span class="section-icon cyan"><svg class="icon"><use href="#icon-activity"/></svg></span><div><h2>Atividade local</h2><p>Eventos reais deste aplicativo</p></div></div><span class="live-label"><i></i> ATUALIZAÇÃO MANUAL</span></div><div class="activity-list" id="activity-list"><div class="activity-empty">Nenhum evento registrado.</div></div></section>
+        </div>
+        <aside class="right-column">
+          <section class="panel risk-panel">
+            <div class="section-heading compact"><div class="heading-title"><span class="section-icon red"><svg class="icon"><use href="#icon-shield"/></svg></span><div><h2>Blindagem operacional</h2></div></div><span id="risk-badge" class="risk-badge">PROTEGIDO</span></div>
+            <div class="live-block"><div class="live-block-head"><div><span class="state-dot red-dot">●</span><strong>Conta REAL</strong></div><span id="real-trading-label" class="state-label">DESARMADA</span></div><p>Conta/servidor são conferidos em cada ordem. Tetos atuais: 0,01 lote, uma posição e risco configurado.</p></div>
+            <button id="emergency-stop" class="button destructive full"><svg class="icon"><use href="#icon-power"/></svg> <span id="emergency-button-label">FECHAR POSIÇÕES DEMO</span></button>
+            <small id="emergency-result" class="emergency-result" aria-live="polite">Aguardando comando de emergência nesta sessão.</small>
+            <div class="demo-block"><div class="demo-heading"><span>Fechamento em conta DEMO</span><span id="demo-armed-label" class="state-label">DESARMADO</span></div><div class="demo-actions"><button class="button secondary full" id="arm-demo">Armar fechamento</button><button class="button secondary full" id="test-demo-order">Teste · 0,01 EURUSD</button></div></div>
+            <div class="demo-block"><div class="demo-heading"><span>Fechamento em conta REAL</span><span id="real-close-armed-label" class="state-label">DESARMADO</span></div><button class="button secondary full" id="arm-real-close">Armar fechamento individual REAL</button></div>
+            <small class="disclaimer">Confirmação e reconciliação obrigatórias; sem reenvio automático em timeout.</small>
+          </section>
+          <section class="panel terminal-panel"><div class="section-heading compact"><div class="heading-title"><span class="section-icon cyan"><svg class="icon"><use href="#icon-terminal"/></svg></span><div><h2>Console do sistema</h2><p>Sem ticks ou dados simulados</p></div></div><span class="console-status"><i></i> LOCAL</span></div><div class="terminal-output" id="terminal-output"><div class="terminal-line muted-line">Aguardando atividade do aplicativo…</div></div><div class="terminal-footer"><span>Somente leitura</span><span id="terminal-update">—</span></div></section>
+        </aside>
+      </div>
+      <footer class="footer-strip panel"><div class="footer-mark"><svg class="icon"><use href="#icon-activity"/></svg></div><div><strong>ScalperLab — área de pesquisa e validação</strong><span>Indicadores e estatísticas só aparecem quando calculados a partir de dados reais disponíveis.</span></div><div class="footer-meta"><span>MT5 Python API</span><i></i><span id="footer-data-status">Sem conexão</span></div></footer>
+    </section>
+
+    <section class="view" id="view-strategies">
+      <div class="page-intro"><div><span class="eyebrow">CATÁLOGO</span><h1>Estratégias</h1><p>Registre regras, importe código e encaminhe para revisão. Aprovar não inicia automação.</p></div><button class="button primary" data-action="new-strategy"><svg class="icon"><use href="#icon-plus"/></svg> Cadastrar estratégia</button></div>
+      <div class="filter-row"><div class="segmented"><button class="selected" data-strategy-filter="all">Todas</button><button data-strategy-filter="draft">Rascunho</button><button data-strategy-filter="review">Em revisão</button><button data-strategy-filter="approved">Aprovadas</button></div><span id="strategy-total-label" class="subtle-label">0 registros</span></div>
+      <div class="strategy-list-grid" id="all-strategies"></div>
+    </section>
+
+    <section class="view" id="view-research">
+      <div class="page-intro"><div><span class="eyebrow">FONTES PÚBLICAS</span><h1>Pesquisa de estratégias</h1><p>Pesquise e salve fontes. Revise evidências antes de transformar qualquer achado em regra.</p></div></div>
+      <section class="panel research-search-panel"><form id="search-form"><label for="research-query">O que você quer pesquisar?</label><div class="search-row"><input id="research-query" maxlength="240" placeholder="Ex.: rompimento de volatilidade MQL5 XAUUSD" required><button class="button primary" type="submit"><svg class="icon"><use href="#icon-search"/></svg> Pesquisar fontes</button></div></form><div class="provider-grid" id="provider-grid"></div></section>
+      <section class="panel source-import-panel"><div><h2>Adicionar uma página ou feed</h2><p>Use HTTPS. Fontes RSS/Atom podem ser adicionadas à pesquisa recorrente.</p></div><form id="import-form" class="import-form"><input id="source-url" type="url" placeholder="https://site-publico.com/artigo-ou-feed" required><button class="button secondary" type="submit">Importar URL</button></form><form id="feed-form" class="feed-form"><input id="feed-label" maxlength="100" placeholder="Nome do feed (ex.: Blog MQL5)"><input id="feed-url" type="url" placeholder="https://site-publico.com/feed.xml" required><button class="button secondary" type="submit">Adicionar feed</button></form><div id="feed-list" class="feed-list"></div></section>
+      <section class="panel research-results-panel"><div class="section-heading"><div class="heading-title"><span class="section-icon cyan"><svg class="icon"><use href="#icon-search"/></svg></span><div><h2>Achados salvos</h2><p id="research-caption">Links, origem, data e trechos de evidência</p></div><span class="count-chip" id="research-count">0 fontes</span></div><button class="button secondary" id="summarize-button" disabled>Analisar seleção com IA</button></div><div id="ai-summary" class="ai-summary hidden"></div><div id="research-results" class="research-results"><div class="empty-card">Pesquise ou importe uma fonte para começar.</div></div></section>
+    </section>
+
+    <section class="view" id="view-orders">
+      <div class="page-intro"><div><span class="eyebrow">MT5</span><h1>Ordens e posições</h1><p>Leitura direta do terminal; fechamento DEMO ou REAL depende de armamento e confirmação correspondentes.</p></div><button class="button secondary" data-action="refresh"><svg class="icon"><use href="#icon-refresh"/></svg> Atualizar</button></div>
+      <section class="panel section-panel"><div class="section-heading"><div class="heading-title"><span class="section-icon green"><svg class="icon"><use href="#icon-arrows"/></svg></span><div><h2>Posições abertas</h2><p id="all-orders-caption">Conecte o terminal MT5 para consultar posições.</p></div></div><span id="all-position-count" class="count-chip">—</span></div><div class="table-wrap"><table><thead><tr><th>Ticket</th><th>Ativo</th><th>Tipo</th><th class="right">Lote</th><th class="right">Entrada</th><th class="right">Atual</th><th class="right">S/L</th><th class="right">T/P</th><th class="right">Lucro/Prejuízo</th><th></th></tr></thead><tbody id="all-orders"><tr><td colspan="10" class="empty-cell">Nenhuma posição consultada.</td></tr></tbody></table></div></section>
+      <section class="notice-card"><svg class="icon"><use href="#icon-info"/></svg><div><strong>Sem reenvio automático em caso de estado desconhecido</strong><p>Se o terminal aceitar uma solicitação mas a reconciliação falhar, atualize as posições e o histórico no MT5 antes de tentar outra ação.</p></div></section>
+    </section>
+
+    <section class="view" id="view-risk">
+      <div class="page-intro"><div><span class="eyebrow">CONTROLES</span><h1>Risco e segurança</h1><p>O motor começa parado; os tetos são explícitos e não garantem o resultado nem o risco realizado.</p></div></div>
+      <section class="panel analyst-panel">
+        <div class="section-heading"><div class="heading-title"><span class="section-icon cyan"><svg class="icon"><use href="#icon-activity"/></svg></span><div><h2>Analista de mercado</h2><p>Análise contínua do gráfico MT5, sem exigir cadastro de estratégias</p></div></div><span id="analyst-status" class="status-chip">PARADO</span></div>
+        <p class="engine-disclaimer">M15 é o período recomendado. A regra experimental usa candle fechado, alinhamento técnico/quantitativo e retomada da SMA 21. O envio REAL requer confirmação textual por início, limita risco estimado a 0,10% do equity, lote a 0,01 e uma posição por conta. Dados fundamentais continuam indisponíveis; ordens não representam validação nem garantia de resultado.</p>
+        <form id="analyst-form" class="engine-form analyst-form">
+          <label>Ativo(s) do Market Watch<input name="symbols" maxlength="500" required placeholder="Ex.: EURUSD, GOLD#, US500.cash"><small class="engine-help">Informe os nomes exatos visíveis no Market Watch; o servidor valida todos antes de iniciar. Até 12 ativos.</small></label>
+          <label>Timeframe<select name="timeframe"><option>M15</option><option>M1</option><option>M2</option><option>M3</option><option>M4</option><option>M5</option><option>M6</option><option>M10</option><option>M12</option><option>M20</option><option>M30</option><option>H1</option><option>H2</option><option>H3</option><option>H4</option><option>H6</option><option>H8</option><option>H12</option><option>D1</option><option>W1</option><option>MN1</option></select><small class="engine-help">M15 vem selecionado como recomendação inicial; os demais períodos do MT5 estão disponíveis.</small></label>
+          <div class="engine-actions"><button class="button secondary" type="submit">Salvar perfil de análise</button><button class="button secondary" id="analyst-observe" type="button">Iniciar observação</button><button class="button primary" id="analyst-demo" type="button">Iniciar execução DEMO</button><button class="button danger" id="analyst-real" type="button">Iniciar execução REAL</button><button class="button danger" id="analyst-stop" type="button">Parar analista</button></div>
+        </form>
+        <div id="analyst-detail" class="engine-detail">Configure ativo(s) e inicie para monitorar. A análise começa parada após reinício.</div>
+        <div id="analyst-results" class="analysis-grid"><div class="empty-card">Nenhuma análise disponível.</div></div>
+      </section>
+      <section class="panel engine-panel">
+        <div class="section-heading"><div class="heading-title"><span class="section-icon cyan"><svg class="icon"><use href="#icon-activity"/></svg></span><div><h2>Execução por estratégias cadastradas</h2><p>Modo separado do novo Analista de mercado</p></div></div><span id="engine-status" class="status-chip">PARADO</span></div>
+        <p class="engine-disclaimer">Cada regra é uma adaptação operacional e não comprova rentabilidade. DEMO e REAL podem enviar ordens após aprovação da estratégia, limites configurados e confirmação específica em cada início. Arquivos importados nunca são executados como código.</p>
+        <form id="engine-form" class="engine-form">
+          <label>Estratégia<select name="strategy_id" id="engine-strategy" required><option value="">Carregando estratégias…</option></select><small id="engine-compat-note" class="engine-help">Aprovação no catálogo não significa compatibilidade com o motor.</small><small id="engine-rule-note" class="engine-help"></small></label>
+          <label id="engine-symbol-label">Ativo(s) MT5<input name="symbol" maxlength="180" value="EURUSD" required placeholder="Ex.: EURUSD,GBPUSD,USDJPY"></label>
+          <label>Fuso da sessão<select name="timezone"><option value="Europe/London">Londres</option><option value="America/New_York">Nova York</option></select></label>
+          <label class="orb-only">Abertura local<input name="session_open" type="time" value="08:00"></label>
+          <label class="orb-only">Faixa inicial (min)<input name="range_minutes" type="number" min="5" max="60" value="15"></label>
+          <label class="orb-only">Fim das entradas<input name="trade_end" type="time" value="11:00"></label>
+          <label id="engine-lookback-label">Lookback (barras D1)<input name="lookback_days" type="number" min="2" max="252" value="20"></label>
+          <label id="engine-gap-label">Gap mínimo (ATR)<input name="gap_atr_multiple" type="number" min="0.5" max="5" step="0.1" value="1.5"></label>
+          <label>Risco máximo por trade (%)<input name="risk_per_trade_pct" type="number" min="0.01" max="0.25" step="0.01" value="0.25" required></label>
+          <label>Parada diária (%)<input name="daily_loss_limit_pct" type="number" min="0.1" max="1" step="0.1" value="1" required></label>
+          <label>Alvo em múltiplos de risco<input name="reward_risk" type="number" min="0.5" max="3" step="0.1" value="1.5" required></label>
+          <div class="engine-limits"><strong>Tetos fixos de segurança</strong><span>máximo 0,01 lote · uma tentativa por sessão (M1 na ORB/gap; por candle D1 nas regras diárias) · nenhuma posição prévia. A perda estimada exclui comissão, spread futuro, slippage e gaps; a perda real pode ultrapassar os limites percentuais.</span></div>
+          <div class="engine-actions"><button class="button secondary" type="submit">Salvar configuração</button><button class="button secondary" id="engine-observe" type="button">Iniciar observação</button><button class="button primary" id="engine-demo" type="button">Iniciar execução DEMO</button><button class="button danger" id="engine-real" type="button">Iniciar execução REAL</button><button class="button danger" id="engine-stop" type="button">Parar motor</button></div>
+        </form>
+        <div id="engine-detail" class="engine-detail">Motor parado após reinício; a execução nunca reinicia automaticamente.</div>
+        <pre id="engine-last-signal" class="engine-signal hidden"></pre>
+      </section>
+      <div class="settings-grid"><section class="panel settings-panel"><span class="section-icon red"><svg class="icon"><use href="#icon-shield"/></svg></span><h2>Conta e ordens reais</h2><p>REAL pode ser armada por ação explícita. O backend exige conta REAL identificada, negociação autorizada no terminal, limites e stops válidos.</p><div class="setting-row"><span>Envio REAL</span><b class="state-label">CONFIRMAÇÃO POR INÍCIO</b></div><div class="setting-row"><span>Fechamento individual</span><b id="settings-real-close-state" class="state-label">DESARMADO</b></div><button class="button secondary" id="risk-arm-real-close">Armar fechamento individual REAL</button></section><section class="panel settings-panel"><span class="section-icon green"><svg class="icon"><use href="#icon-check"/></svg></span><h2>Conta demo</h2><p>O motor confirma a conta em cada ciclo, usa risco e stops no servidor e interrompe novas entradas em estado incerto.</p><div class="setting-row"><span>Fechamento demo armado</span><b id="risk-demo-state" class="state-label">DESARMADO</b></div><button class="button secondary" id="risk-arm-demo">Armar somente fechamento demo</button></section><section class="panel settings-panel"><span class="section-icon cyan"><svg class="icon"><use href="#icon-code"/></svg></span><h2>Dados e armazenamento</h2><p>Banco local do usuário, sem senhas da conta MT5. Segredos de APIs são lidos apenas do ambiente do processo.</p><div class="setting-row"><span>Senha MT5 armazenada</span><b class="safe-label">NÃO</b></div><div class="setting-row"><span>Envio REAL no backend</span><b class="state-label">DISPONÍVEL COM CONFIRMAÇÃO</b></div></section></div>
+    </section>
+
+    <section class="view" id="view-settings">
+      <div class="page-intro"><div><span class="eyebrow">APLICATIVO</span><h1>Configurações</h1><p>Conectores externos são opcionais e não podem substituir a revisão humana.</p></div></div>
+      <section class="panel settings-panel"><h2>Disponibilidade das fontes</h2><div id="settings-providers" class="provider-grid"></div><div class="setting-note"><strong>Chaves opcionais</strong><p>Configure <code>SCALPERLAB_BRAVE_API_KEY</code>, <code>SCALPERLAB_YOUTUBE_API_KEY</code> e <code>OPENAI_API_KEY</code> como variáveis de ambiente do Windows e reinicie o aplicativo. Não cole chaves nesta interface.</p></div></section>
+      <section class="panel settings-panel"><h2>Direitos e procedência</h2><p>ScalperLab guarda metadados, URLs e trechos curtos para revisão local. A coleta segue os métodos públicos configurados pelo usuário; respeite os termos, quotas e direitos de cada fonte. O conteúdo não é republicado automaticamente.</p></section>
+      <section class="panel settings-panel"><h2>Sobre a validação de código</h2><p>Arquivos Python são analisados em subprocesso isolado para sintaxe e importações sensíveis. MQL5 recebe verificações estruturais estáticas. O aplicativo não executa, não compila e não declara seguro o código importado.</p></section>
+    </section>
+  </main>
+</div>
+
+<div class="modal-backdrop hidden" id="strategy-modal" role="dialog" aria-modal="true" aria-labelledby="strategy-modal-title">
+  <div class="modal-card"><div class="modal-head"><div><span class="eyebrow">NOVA ESTRATÉGIA</span><h2 id="strategy-modal-title">Cadastrar para revisão</h2></div><button class="icon-button" id="close-strategy-modal" aria-label="Fechar"><svg class="icon"><use href="#icon-close"/></svg></button></div>
+    <form id="strategy-form"><label>Nome<input name="name" maxlength="120" placeholder="Preenchido a partir do arquivo quando possível"></label><div class="form-columns"><label>Ativo ou universo<input name="market" maxlength="120" placeholder="Ex.: XAUUSD"></label><label>Período gráfico<input name="timeframe" maxlength="24" placeholder="Ex.: M15"></label></div><label>Regras e parâmetros<textarea name="description" maxlength="8000" rows="5" placeholder="Será sugerida uma descrição após importar; revise entradas, saídas, stop, alvo e risco"></textarea></label><label class="file-drop">Importar estratégia (.mq5, .py ou .txt)<input name="file" id="strategy-file" type="file" accept=".mq5,.py,.txt,text/plain,text/x-python"><span id="file-label">Escolher arquivo</span></label><div id="source-adaptation" class="source-adaptation hidden" aria-live="polite"></div><div class="modal-warning"><svg class="icon"><use href="#icon-info"/></svg><span>O arquivo é analisado estaticamente e guardado no rascunho. Não é executado, compilado nem convertido automaticamente em regra compatível com o motor.</span></div><div class="modal-actions"><button type="button" class="button secondary" id="cancel-strategy">Cancelar</button><button class="button primary" type="submit">Salvar rascunho</button></div></form>
+  </div>
+</div>
+<div class="modal-backdrop hidden" id="source-modal" role="dialog" aria-modal="true" aria-labelledby="source-modal-title">
+  <div class="modal-card source-modal-card"><div class="modal-head"><div><span class="eyebrow">CÓDIGO ORIGINAL · SOMENTE LEITURA</span><h2 id="source-modal-title">Arquivo da estratégia</h2></div><button class="icon-button" id="close-source-modal" aria-label="Fechar"><svg class="icon"><use href="#icon-close"/></svg></button></div><pre id="source-content" class="source-code"></pre></div>
+</div>
+<div class="toast-region" id="toast-region" aria-live="polite"></div>
+</body>
+</html>

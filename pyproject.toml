@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "scalperlab-desktop"
+version = "0.1.0"
+description = "Local desktop research and strategy review workspace for MetaTrader 5"
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+  "Flask>=3.1,<4",
+  "pywebview>=5.4,<7",
+  "tzdata>=2025.1; platform_system == 'Windows'",
+  "MetaTrader5>=5.0.45; platform_system == 'Windows'",
+]
+
+[project.optional-dependencies]
+dev = ["ruff>=0.11,<1", "pytest>=9,<10"]
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["scalperlab*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
