@@ -8,6 +8,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .mt5_calendar_bridge import calendar_context_for_symbol, read_calendar_export
+from .mt5_time import (MAX_FUTURE_TIME_SKEW_SECONDS, MT5_MAX_CLOSED_BAR_AGE_SECONDS,
+                       MT5TimeError, normalize_tick_time)
 
 
 def _terminal_serialized(method):
@@ -497,8 +499,36 @@ class MT5Gateway:
                      "spread": int(rate_value(row, "spread")),
                      "real_volume": int(rate_value(row, "real_volume"))}
                     for row in rates]
+            tick = mt5.symbol_info_tick(symbol_name)
+            if tick is None:
+                return {"ok": False,
+                        "detail": "Tick atual indisponível; não foi possível validar o fuso do histórico."}
+            normalized_tick = normalize_tick_time(
+                getattr(tick, "time", 0), getattr(tick, "time_msc", None))
+            offset = normalized_tick.server_utc_offset_seconds
+            for bar in bars:
+                bar["time"] -= offset
             bars.sort(key=lambda item: item["time"])
+            now_epoch = time.time()
+            latest_bar_age = now_epoch - bars[-1]["time"] if bars else None
+            max_closed_bar_age = MT5_MAX_CLOSED_BAR_AGE_SECONDS.get(timeframe)
+            if not bars or bars[-1]["time"] > now_epoch + MAX_FUTURE_TIME_SKEW_SECONDS:
+                return {"ok": False,
+                        "detail": "Histórico MT5 permanece no futuro após a normalização UTC."}
+            if max_closed_bar_age is None:
+                return {"ok": False, "detail": f"Timeframe MT5 sem regra de frescor: {timeframe}."}
+            if latest_bar_age is None or latest_bar_age > max_closed_bar_age:
+                return {"ok": False,
+                        "detail": "Último candle fechado desatualizado; análise bloqueada."}
             return {"ok": True, "symbol": symbol.name, "bars": bars,
+                    "time_normalization": {
+                        "basis": "UTC", "source": "live_mt5_tick_vs_system_utc",
+                        "server_utc_offset_seconds": offset,
+                        "tick_age_seconds": round(normalized_tick.age_seconds, 3),
+                        "calibration_residual_seconds": round(
+                            normalized_tick.calibration_residual_seconds, 3),
+                        "last_closed_bar_age_seconds": round(latest_bar_age, 3),
+                    },
                     "contract": {"digits": int(symbol.digits), "point": float(symbol.point),
                                  "trade_tick_size": float(getattr(symbol, "trade_tick_size", 0.0)),
                                  "trade_tick_value_profit": float(getattr(symbol, "trade_tick_value_profit", 0.0)),
@@ -519,6 +549,8 @@ class MT5Gateway:
                                  "trade_stops_level": int(symbol.trade_stops_level),
                                  "filling_mode": int(symbol.filling_mode),
                                  "trade_exemode": int(symbol.trade_exemode)}}
+        except MT5TimeError as exc:
+            return {"ok": False, "detail": str(exc)}
         except Exception as exc:
             return {"ok": False, "detail": f"Falha ao consultar barras/contrato ({type(exc).__name__})."}
 
@@ -532,7 +564,19 @@ class MT5Gateway:
             tick = mt5.symbol_info_tick(symbol_name)
             if tick is None or not float(tick.bid) > 0 or not float(tick.ask) > 0:
                 return {"ok": False, "detail": "Sem cotação válida para o símbolo."}
-            return {"ok": True, "bid": float(tick.bid), "ask": float(tick.ask), "time": int(tick.time)}
+            normalized = normalize_tick_time(getattr(tick, "time", 0),
+                                             getattr(tick, "time_msc", None))
+            return {"ok": True, "bid": float(tick.bid), "ask": float(tick.ask),
+                    "time": normalized.utc_time, "time_msc": normalized.utc_time_msc,
+                    "time_normalization": {
+                        "basis": "UTC", "source": "live_mt5_tick_vs_system_utc",
+                        "server_utc_offset_seconds": normalized.server_utc_offset_seconds,
+                        "age_seconds": round(normalized.age_seconds, 3),
+                        "calibration_residual_seconds": round(
+                            normalized.calibration_residual_seconds, 3),
+                    }}
+        except MT5TimeError as exc:
+            return {"ok": False, "detail": str(exc)}
         except Exception as exc:
             return {"ok": False, "detail": f"Falha ao ler cotação ({type(exc).__name__})."}
 

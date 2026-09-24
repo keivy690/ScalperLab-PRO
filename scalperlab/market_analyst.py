@@ -9,15 +9,11 @@ from statistics import median
 from typing import Any
 
 from .config import MT5_SYMBOL_PATTERN
+from .mt5_time import (MAX_FUTURE_TIME_SKEW_SECONDS, MAX_TICK_AGE_SECONDS,
+                       MT5_TIMEFRAME_SECONDS)
 from .trading.ports import TradingPort
 
-TIMEFRAMES_SECONDS = {
-    "M1": 60, "M2": 120, "M3": 180, "M4": 240, "M5": 300,
-    "M6": 360, "M10": 600, "M12": 720, "M15": 900, "M20": 1200,
-    "M30": 1800, "H1": 3600, "H2": 7200, "H3": 10800, "H4": 14400,
-    "H6": 21600, "H8": 28800, "H12": 43200, "D1": 86400,
-    "W1": 604800, "MN1": 2592000,
-}
+TIMEFRAMES_SECONDS = MT5_TIMEFRAME_SECONDS
 SYMBOL_PATTERN = MT5_SYMBOL_PATTERN
 
 
@@ -71,7 +67,8 @@ def _bias_label(value: float | None) -> str:
 
 def analyze_market(symbol: str, timeframe: str, bars: list[dict[str, Any]],
                    contract: dict[str, Any], tick: dict[str, Any] | None = None,
-                   fundamental: dict[str, Any] | None = None) -> dict[str, Any]:
+                   fundamental: dict[str, Any] | None = None,
+                   *, now_epoch: float | None = None) -> dict[str, Any]:
     """Analyze closed bars and derive an auditable experimental pullback signal."""
     timeframe = timeframe.upper()
     if timeframe not in TIMEFRAMES_SECONDS:
@@ -100,6 +97,12 @@ def analyze_market(symbol: str, timeframe: str, bars: list[dict[str, Any]],
             return _insufficient(symbol.upper(), timeframe, len(ordered), "Há horários repetidos ou fora de ordem no histórico.")
         last_time = stamp
         clean.append({**row, "time": stamp, "open": opened, "high": high, "low": low, "close": close})
+
+    reference_epoch = time.time() if now_epoch is None else float(now_epoch)
+    if clean[-1]["time"] > reference_epoch + MAX_FUTURE_TIME_SKEW_SECONDS:
+        return _insufficient(symbol.upper(), timeframe, len(clean),
+                             "Timestamp do último candle está no futuro; "
+                             "análise bloqueada até validar UTC.")
 
     closes = [row["close"] for row in clean]
     ranges = _true_ranges(clean)
@@ -407,6 +410,7 @@ class MarketAnalystEngine:
                         analysis = analyze_market(symbol, config["timeframe"], market["bars"],
                                                   market.get("contract", {}), tick if tick.get("ok") else None,
                                                   fundamental=fundamental)
+                        analysis["time_normalization"] = market.get("time_normalization")
                         self._maybe_execute(symbol, analysis, market, tick)
                         results.append(analysis)
                     except Exception as exc:
@@ -464,8 +468,8 @@ class MarketAnalystEngine:
             self.stop("Limite diário DEMO atingido; verifique equity e posições no MT5.")
             return
         current_tick = tick if tick.get("ok") else {}
-        tick_age = abs(time.time() - float(current_tick.get("time", 0) or 0))
-        if tick_age > 120:
+        tick_age = time.time() - float(current_tick.get("time", 0) or 0)
+        if tick_age < -MAX_FUTURE_TIME_SKEW_SECONDS or tick_age > MAX_TICK_AGE_SECONDS:
             decision["execution_status"] = "COTACAO_DESATUALIZADA"
             decision["reasons"].append("Cotação ausente/desatualizada; sinal descartado.")
             return
