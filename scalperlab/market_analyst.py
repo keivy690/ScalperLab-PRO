@@ -9,6 +9,7 @@ from statistics import median
 from typing import Any
 
 from .config import MT5_SYMBOL_PATTERN
+from .trading.ports import TradingPort
 
 TIMEFRAMES_SECONDS = {
     "M1": 60, "M2": 120, "M3": 180, "M4": 240, "M5": 300,
@@ -265,7 +266,7 @@ def _insufficient(symbol: str, timeframe: str, count: int, detail: str) -> dict[
 class MarketAnalystEngine:
     """Continuous market analysis with explicit observation and demo-execution modes."""
 
-    def __init__(self, database: Any, gateway: Any, interval_seconds: int = 30) -> None:
+    def __init__(self, database: Any, gateway: TradingPort, interval_seconds: int = 30) -> None:
         self.database = database
         self.gateway = gateway
         self.interval_seconds = max(15, int(interval_seconds))

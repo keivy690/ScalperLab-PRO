@@ -9,6 +9,7 @@ from flask import Flask, jsonify, render_template, request
 
 from .ai_assistant import AIAssistant
 from .config import MAX_REQUEST_BYTES
+from .connectors.manager import ConnectorManager
 from .db import Database
 from .execution_engine import ExecutionEngine
 from .market_analyst import MarketAnalystEngine
@@ -21,13 +22,15 @@ VALID_STRATEGY_STATES = {"review", "approved", "rejected"}
 
 
 def create_app(*, database: Database | None = None, mt5: MT5Gateway | None = None,
-               token: str | None = None) -> Flask:
+               token: str | None = None, terminal_id: str = "default") -> Flask:
     app = Flask(__name__, template_folder=str(PROJECT_ROOT / "templates"),
                 static_folder=str(PROJECT_ROOT / "static"), static_url_path="/static")
     app.config["MAX_CONTENT_LENGTH"] = MAX_REQUEST_BYTES
     app.config["APP_TOKEN"] = token or secrets.token_urlsafe(32)
     app.extensions["scalper_db"] = database or Database()
-    app.extensions["scalper_mt5"] = mt5 or MT5Gateway()
+    connector_manager = ConnectorManager()
+    app.extensions["scalper_connector_manager"] = connector_manager
+    app.extensions["scalper_mt5"] = mt5 or connector_manager.get_connector(terminal_id)
     app.extensions["scalper_research"] = ResearchService(app.extensions["scalper_db"])
     app.extensions["scalper_ai"] = AIAssistant()
     app.extensions["scalper_engine"] = ExecutionEngine(

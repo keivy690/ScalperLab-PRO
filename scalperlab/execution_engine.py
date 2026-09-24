@@ -8,7 +8,6 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .config import MT5_SYMBOL_PATTERN
 from .db import Database
-from .mt5_gateway import MT5Gateway
 from .strategy_rules import (
     STRATEGY_TYPES,
     broker_swap_carry,
@@ -16,6 +15,7 @@ from .strategy_rules import (
     time_series_momentum,
     weekend_gap_reversal,
 )
+from .trading.ports import TradingPort
 
 ENGINE_CONFIRMATION = "INICIAR MOTOR SOMENTE DEMO"
 REAL_ENGINE_CONFIRMATION = "AUTORIZO MOTOR EM CONTA REAL"
@@ -26,7 +26,7 @@ ALLOWED_ZONES = {"Europe/London", "America/New_York"}
 class ExecutionEngine:
     """Fail-closed declarative strategy engine for demo execution or observation."""
 
-    def __init__(self, database: Database, gateway: MT5Gateway) -> None:
+    def __init__(self, database: Database, gateway: TradingPort) -> None:
         self.database = database
         self.gateway = gateway
         saved = database.get_engine_runtime()
@@ -387,7 +387,8 @@ class ExecutionEngine:
             send_order = (self.gateway.send_real_strategy_order if mode == "real"
                           else self.gateway.send_demo_strategy_order)
             result = send_order(symbol, side, sizing["volume"], stop, target, config["strategy_id"],
-                                expected_account_fingerprint=self.state.get("account_fingerprint"))
+                                expected_account_fingerprint=self.state.get("account_fingerprint"),
+                                risk_cash=risk_cash)
             self.state["last_signal"] = {**event, "execution": result}
             if result.get("unknown"):
                 self.state.update(running=False, mode="parado", phase="resultado_desconhecido",

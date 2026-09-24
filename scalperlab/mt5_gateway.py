@@ -20,8 +20,13 @@ def _terminal_serialized(method):
 class MT5Gateway:
     """MT5 data gateway and explicitly armed, risk-limited order execution."""
 
-    def __init__(self, mt5_module=None) -> None:
+    def __init__(self, mt5_module=None, *, terminal_id: str = "default",
+                 terminal_path: str | None = None,
+                 symbol_mappings: dict[str, str] | None = None) -> None:
         self._mt5 = mt5_module
+        self.terminal_id = terminal_id
+        self.terminal_path = terminal_path
+        self.symbol_mappings = {key.upper(): value for key, value in (symbol_mappings or {}).items()}
         self._lock = threading.RLock()
         self._trade_lock = threading.RLock()
         self._initialized = False
@@ -99,7 +104,10 @@ class MT5Gateway:
                     return None
                 if not self._initialized:
                     try:
-                        connected = mt5.initialize(timeout=5_000)
+                        options = {"timeout": 5_000}
+                        if self.terminal_path:
+                            options["path"] = self.terminal_path
+                        connected = mt5.initialize(**options)
                     except TypeError:  # narrow support for simple connector fakes
                         connected = mt5.initialize()
                     if not connected:
@@ -132,6 +140,79 @@ class MT5Gateway:
             self.strategy_engine_armed = False
             self.analyst_engine_armed = False
             self._engine_armed_mode = self._engine_armed_fingerprint = None
+
+    def resolve_broker_symbol(self, symbol: str) -> str:
+        """Map an internal symbol ID to its exact name in this terminal."""
+        return self.symbol_mappings.get(symbol.upper(), symbol)
+
+    def available_symbols(self):
+        """Return the complete broker catalog, independent of Market Watch visibility."""
+        from .trading.models import Symbol
+        mt5 = self._connect()
+        if mt5 is None:
+            return []
+        rows = mt5.symbols_get()
+        if rows is None:
+            return []
+        reverse = {broker: canonical for canonical, broker in self.symbol_mappings.items()}
+        return [Symbol.from_broker_info(row, reverse.get(str(getattr(row, "name", ""))))
+                for row in rows if getattr(row, "name", None)]
+
+    def market_watch_symbols(self):
+        """Return only symbols currently visible in this terminal's Market Watch."""
+        return [symbol for symbol in self.available_symbols() if symbol.visible]
+
+    def terminal_state(self) -> dict[str, Any]:
+        state = self.state()
+        return {"terminal_id": self.terminal_id, "connected": state["connected"],
+                "status": state["status"], "detail": state.get("detail"),
+                "terminal": state.get("terminal")}
+
+    def account_state(self) -> dict[str, Any]:
+        return self.state().get("account") or {}
+
+    def tick(self, broker_symbol: str) -> dict[str, Any]:
+        return self.current_tick(self.resolve_broker_symbol(broker_symbol))
+
+    def rates(self, broker_symbol: str, timeframe: str, count: int) -> dict[str, Any]:
+        return self.strategy_market_data(self.resolve_broker_symbol(broker_symbol), count, timeframe)
+
+    def orders(self) -> dict[str, Any]:
+        mt5 = self._connect()
+        if mt5 is None:
+            return {"available": False, "detail": self.last_error, "items": []}
+        try:
+            rows = mt5.orders_get()
+            if rows is None:
+                return {"available": False, "detail": f"Consulta de ordens falhou ({mt5.last_error()}).",
+                        "items": []}
+            return {"available": True, "detail": None,
+                    "items": [{"ticket": int(row.ticket), "symbol": str(row.symbol),
+                               "type": int(row.type), "volume_current": float(row.volume_current),
+                               "price_open": float(row.price_open), "sl": float(row.sl),
+                               "tp": float(row.tp), "time_setup": int(row.time_setup)} for row in rows]}
+        except Exception as exc:
+            return {"available": False, "detail": f"Falha ao consultar ordens ({type(exc).__name__}).",
+                    "items": []}
+
+    def submit_order(self, order: dict[str, Any]) -> dict[str, Any]:
+        """Submit only through the existing explicitly armed, risk-checked order paths."""
+        engine = order.get("engine")
+        mode = str(order.get("mode", "")).lower()
+        side = str(order.get("side", "")).upper()
+        if mode not in {"demo", "real"}:
+            return {"ok": False, "detail": "Modo de ordem não suportado."}
+        method_name = f"send_{'real' if mode == 'real' else 'demo'}_{engine}_order"
+        sender = getattr(self, method_name, None) if engine in {"strategy", "analyst"} else None
+        required = ("symbol", "volume", "stop", "target", "account_fingerprint", "risk_cash")
+        if sender is None or side not in {"BUY", "SELL"} or any(key not in order for key in required):
+            return {"ok": False, "detail": "Intenção de ordem incompleta ou sem fluxo de segurança suportado."}
+        args = (self.resolve_broker_symbol(str(order["symbol"])), side,
+                float(order["volume"]), float(order["stop"]), float(order["target"]))
+        if engine == "strategy":
+            return sender(*args, order.get("strategy_id", 1),
+                          str(order["account_fingerprint"]), float(order["risk_cash"]))
+        return sender(*args, str(order["account_fingerprint"]), float(order["risk_cash"]))
 
     @_terminal_serialized
     def state(self) -> dict[str, Any]:
@@ -228,6 +309,7 @@ class MT5Gateway:
             visible = [row for row in rows if bool(getattr(row, "visible", True))]
             visible_names = {str(getattr(row, "name", "")) for row in visible
                              if getattr(row, "name", None)}
+            requested = [self.resolve_broker_symbol(name) for name in requested]
             invalid = []
             for name in requested:
                 if name in visible_names:
@@ -246,6 +328,7 @@ class MT5Gateway:
     @_terminal_serialized
     def economic_calendar(self, symbol_name: str) -> dict[str, Any]:
         """Read the local read-only MQL5 calendar snapshot, tied to the connected account."""
+        symbol_name = self.resolve_broker_symbol(symbol_name)
         mt5 = self._connect()
         if mt5 is None:
             return {"status": "unavailable", "events": [], "detail": self.last_error or "MT5 indisponível."}
@@ -271,6 +354,7 @@ class MT5Gateway:
                              timeframe: str = "M1") -> dict[str, Any]:
         """Read closed bars and broker symbol contract details; never sends an order."""
         timeframe = str(timeframe).upper()
+        symbol_name = self.resolve_broker_symbol(symbol_name)
         mt5 = self._connect()
         if mt5 is None:
             return {"ok": False, "detail": self.last_error or "MT5 indisponível."}
@@ -326,6 +410,7 @@ class MT5Gateway:
 
     @_terminal_serialized
     def current_tick(self, symbol_name: str) -> dict[str, Any]:
+        symbol_name = self.resolve_broker_symbol(symbol_name)
         mt5 = self._connect()
         if mt5 is None:
             return {"ok": False, "detail": self.last_error or "MT5 indisponível."}
@@ -340,6 +425,7 @@ class MT5Gateway:
     @_terminal_serialized
     def risk_volume(self, symbol_name: str, side: str, entry: float, stop: float,
                     risk_cash: float, hard_cap: float = 0.01) -> dict[str, Any]:
+        symbol_name = self.resolve_broker_symbol(symbol_name)
         mt5 = self._connect()
         if mt5 is None:
             return {"ok": False, "detail": self.last_error or "MT5 indisponível."}
@@ -367,18 +453,22 @@ class MT5Gateway:
 
     def send_demo_strategy_order(self, symbol_name: str, side: str, volume: float,
                                  stop: float, target: float, strategy_id: int,
-                                 expected_account_fingerprint: str | None = None) -> dict[str, Any]:
+                                 expected_account_fingerprint: str | None = None,
+                                 risk_cash: float | None = None) -> dict[str, Any]:
         """Single demo-only market request. Ambiguous results are never retried."""
         with self._trade_lock, self._lock:
             return self._send_account_order(
-                symbol_name, side, volume, stop, target, strategy_id, expected_account_fingerprint, "strategy")
+                symbol_name, side, volume, stop, target, strategy_id, expected_account_fingerprint,
+                "strategy", risk_cash=risk_cash)
 
     def send_real_strategy_order(self, symbol_name: str, side: str, volume: float,
                                  stop: float, target: float, strategy_id: int,
-                                 expected_account_fingerprint: str | None = None) -> dict[str, Any]:
+                                 expected_account_fingerprint: str | None = None,
+                                 risk_cash: float | None = None) -> dict[str, Any]:
         with self._trade_lock, self._lock:
             return self._send_account_order(symbol_name, side, volume, stop, target,
-                strategy_id, expected_account_fingerprint, "strategy", mode="REAL")
+                strategy_id, expected_account_fingerprint, "strategy", risk_cash=risk_cash,
+                mode="REAL")
 
     def send_demo_analyst_order(self, symbol_name: str, side: str, volume: float,
                                 stop: float, target: float,
@@ -410,6 +500,7 @@ class MT5Gateway:
                                   max_spread: float | None = None,
                                   min_reward_risk: float | None = None,
                                   mode: str = "DEMO") -> dict[str, Any]:
+        symbol_name = self.resolve_broker_symbol(symbol_name)
         armed = self.analyst_engine_armed if engine == "analyst" else self.strategy_engine_armed
         if not armed or self._engine_armed_mode != mode:
             return {"ok": False, "blocked": True, "detail": "Motor de execução não está armado; nenhuma ordem enviada."}
