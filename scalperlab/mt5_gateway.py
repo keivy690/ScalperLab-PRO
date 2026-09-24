@@ -255,6 +255,50 @@ class MT5Gateway:
             return {"available": False, "detail": f"Falha no histórico de negócios ({type(exc).__name__}).",
                     "items": []}
 
+    @_terminal_serialized
+    def history_order_by_ticket(self, ticket: int) -> dict[str, Any]:
+        mt5 = self._connect()
+        if mt5 is None:
+            return {"available": False, "detail": self.last_error, "items": []}
+        try:
+            rows = mt5.history_orders_get(ticket=int(ticket))
+            if rows is None:
+                return {"available": False,
+                        "detail": f"Consulta da ordem histórica {ticket} falhou ({mt5.last_error()}).",
+                        "items": []}
+            fields = ("ticket", "time_setup", "time_setup_msc", "time_done", "time_done_msc",
+                      "type", "state", "magic", "position_id", "symbol", "volume_initial",
+                      "volume_current", "price_open", "price_current", "sl", "tp", "comment")
+            return {"available": True, "detail": None,
+                    "items": [{field: getattr(row, field) for field in fields
+                               if hasattr(row, field)} for row in rows]}
+        except Exception as exc:
+            return {"available": False,
+                    "detail": f"Falha na consulta da ordem histórica ({type(exc).__name__}).",
+                    "items": []}
+
+    @_terminal_serialized
+    def history_deals_by_position(self, position_ticket: int) -> dict[str, Any]:
+        mt5 = self._connect()
+        if mt5 is None:
+            return {"available": False, "detail": self.last_error, "items": []}
+        try:
+            rows = mt5.history_deals_get(position=int(position_ticket))
+            if rows is None:
+                return {"available": False,
+                        "detail": f"Consulta de negócios da posição {position_ticket} falhou ({mt5.last_error()}).",
+                        "items": []}
+            fields = ("ticket", "order", "time", "time_msc", "type", "entry", "magic",
+                      "position_id", "reason", "volume", "price", "commission", "swap",
+                      "profit", "fee", "symbol", "comment")
+            return {"available": True, "detail": None,
+                    "items": [{field: getattr(row, field) for field in fields
+                               if hasattr(row, field)} for row in rows]}
+        except Exception as exc:
+            return {"available": False,
+                    "detail": f"Falha na consulta de negócios da posição ({type(exc).__name__}).",
+                    "items": []}
+
     @staticmethod
     def _correlated_comment(comment: str, correlation_id: str | None) -> str:
         if not correlation_id:

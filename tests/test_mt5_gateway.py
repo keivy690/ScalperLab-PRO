@@ -39,6 +39,7 @@ class FakeMT5:
         self.historical_orders = []
         self.historical_deals = []
         self.history_query_bounds = None
+        self.history_ticket_queries = []
         self.order_check_hook = None
         self.test_symbol = SimpleNamespace(name="EURUSD#", trade_mode=4, order_mode=127,
                                            volume_min=0.01, filling_mode=2)
@@ -64,10 +65,20 @@ class FakeMT5:
             rows = [position for position in rows if position.symbol == symbol]
         return rows
     def orders_get(self): return list(self.pending_orders)
-    def history_orders_get(self, start, end):
+    def history_orders_get(self, start=None, end=None, *, ticket=None, position=None):
+        if ticket is not None or position is not None:
+            self.history_ticket_queries.append(("orders", ticket, position))
+            return [row for row in self.historical_orders
+                    if (ticket is None or row.ticket == ticket)
+                    and (position is None or getattr(row, "position_id", None) == position)]
         self.history_query_bounds = (start, end)
         return list(self.historical_orders)
-    def history_deals_get(self, start, end):
+    def history_deals_get(self, start=None, end=None, *, ticket=None, position=None):
+        if ticket is not None or position is not None:
+            self.history_ticket_queries.append(("deals", ticket, position))
+            return [row for row in self.historical_deals
+                    if (ticket is None or row.order == ticket)
+                    and (position is None or getattr(row, "position_id", None) == position)]
         self.history_query_bounds = (start, end)
         return list(self.historical_deals)
     def order_calc_profit(self, *_args): return -1.0
@@ -127,6 +138,33 @@ class MT5GatewayTests(unittest.TestCase):
         result = gateway.history_orders("2026-01-01T00:00:00Z", "2026-03-01T00:00:00Z")
         self.assertFalse(result["available"])
         self.assertEqual(result["items"], [])
+
+    def test_history_ticket_filters_query_order_and_position_deals(self):
+        mt5 = FakeMT5()
+        mt5.historical_orders = [
+            SimpleNamespace(ticket=71, time_setup=100, time_done=101, type=0, state=4,
+                            magic=5, position_id=70, symbol="EURUSD#", volume_initial=0.01,
+                            volume_current=0.0, price_open=1.1, comment="open"),
+            SimpleNamespace(ticket=73, time_setup=102, time_done=103, type=1, state=4,
+                            magic=5, position_id=70, symbol="EURUSD#", volume_initial=0.01,
+                            volume_current=0.0, price_open=1.09, comment="close"),
+        ]
+        mt5.historical_deals = [
+            SimpleNamespace(ticket=72, order=71, time=101, time_msc=101000, type=0,
+                            entry=0, magic=5, position_id=70, reason=0, volume=0.01,
+                            price=1.1, commission=-0.1, swap=0.0, profit=0.0, fee=0.0,
+                            symbol="EURUSD#", comment="open"),
+        ]
+        gateway = MT5Gateway(mt5)
+
+        order = gateway.history_order_by_ticket(71)
+        deals = gateway.history_deals_by_position(70)
+
+        self.assertTrue(order["available"])
+        self.assertEqual([row["ticket"] for row in order["items"]], [71])
+        self.assertTrue(deals["available"])
+        self.assertEqual([row["ticket"] for row in deals["items"]], [72])
+        self.assertEqual(mt5.history_ticket_queries, [("orders", 71, None), ("deals", None, 70)])
 
     def test_real_account_never_arms_demo_or_submits_order(self):
         mt5 = FakeMT5(mode=2)

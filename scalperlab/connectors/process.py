@@ -36,6 +36,7 @@ class ConnectorHealth:
 _REMOTE_METHODS = {
     "terminal_state", "account_state", "available_symbols", "market_watch_symbols",
     "tick", "rates", "orders", "positions", "history_orders", "history_deals",
+    "history_order_by_ticket", "history_deals_by_position",
     "submit_order", "state",
     "validate_market_symbols", "strategy_market_data", "current_tick", "economic_calendar",
     "risk_volume", "arm_order_engine", "disarm_order_engine",
@@ -324,6 +325,14 @@ class ProcessMT5Connector:
 
     def history_deals(self, date_from: str, date_to: str) -> dict[str, Any]:
         ok, result = self._rpc("history_deals", date_from, date_to)
+        return result if ok else {"available": False, "detail": result, "items": []}
+
+    def history_order_by_ticket(self, ticket: int) -> dict[str, Any]:
+        ok, result = self._rpc("history_order_by_ticket", ticket)
+        return result if ok else {"available": False, "detail": result, "items": []}
+
+    def history_deals_by_position(self, position_ticket: int) -> dict[str, Any]:
+        ok, result = self._rpc("history_deals_by_position", position_ticket)
         return result if ok else {"available": False, "detail": result, "items": []}
 
     def submit_order(self, order: dict[str, Any]) -> dict[str, Any]:

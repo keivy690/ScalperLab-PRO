@@ -359,7 +359,19 @@ class AuditedTradingPort:
                     ids["ticket"].add(int(item["ticket"]))
         except (TypeError, ValueError):
             pass
-        all_orders = orders.get("items", [])
+        all_orders = list(orders.get("items", []))
+        targeted_history_queries = []
+        for order_ticket in sorted(ids["order"])[:50]:
+            ticket_orders = self._safe_history("history_order_by_ticket", order_ticket)
+            all_orders.extend(ticket_orders.get("items", []))
+            targeted_history_queries.append(
+                {
+                    "order_ticket": order_ticket,
+                    "orders_available": bool(ticket_orders.get("available")),
+                    "orders_count": len(ticket_orders.get("items", [])),
+                }
+            )
+        all_orders = self._deduplicate_history(all_orders)
         matched_orders = [
             item
             for item in all_orders
@@ -369,7 +381,25 @@ class AuditedTradingPort:
             )
         ]
         order_tickets = {int(item.get("ticket", 0) or 0) for item in matched_orders}
-        all_deals = deals.get("items", [])
+        all_deals = list(deals.get("items", []))
+        position_tickets = sorted(
+            {
+                int(item.get("position_id", 0) or 0)
+                for item in matched_orders
+                if int(item.get("position_id", 0) or 0) > 0
+            }
+        )[:50]
+        for position_ticket in position_tickets:
+            position_deals = self._safe_history("history_deals_by_position", position_ticket)
+            all_deals.extend(position_deals.get("items", []))
+            targeted_history_queries.append(
+                {
+                    "position_ticket": position_ticket,
+                    "deals_available": bool(position_deals.get("available")),
+                    "deals_count": len(position_deals.get("items", [])),
+                }
+            )
+        all_deals = self._deduplicate_history(all_deals)
         matched_deals = [
             item
             for item in all_deals
@@ -468,6 +498,7 @@ class AuditedTradingPort:
             "match_found": found,
             "orders": matched_orders,
             "deals": matched_deals,
+            "targeted_history_queries": targeted_history_queries,
             "positions": correlated_positions,
             "closure_confirmed": closure_confirmed,
             "follow_up_close_correlation_id": (
@@ -518,9 +549,20 @@ class AuditedTradingPort:
         total = sum(volume for volume, _price in weighted)
         return sum(volume * price for volume, price in weighted) / total if total else None
 
-    def _safe_history(self, method: str, date_from: str, date_to: str) -> dict[str, Any]:
+    @staticmethod
+    def _deduplicate_history(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        unique = {}
+        for item in items:
+            ticket = item.get("ticket")
+            if ticket is None:
+                unique[(len(unique), repr(item))] = item
+            else:
+                unique[int(ticket)] = item
+        return list(unique.values())
+
+    def _safe_history(self, method: str, *args: Any) -> dict[str, Any]:
         try:
-            history = getattr(self.connector, method)(date_from, date_to)
+            history = getattr(self.connector, method)(*args)
             if isinstance(history, dict):
                 return history
         except Exception:

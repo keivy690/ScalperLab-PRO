@@ -20,6 +20,8 @@ class HistoryConnector:
         self.calls = 0
         self.orders = []
         self.deals = []
+        self.targeted_orders = []
+        self.targeted_deals = []
         self.open_positions = []
 
     def state(self):
@@ -38,6 +40,24 @@ class HistoryConnector:
         return {
             "available": self.history_available,
             "items": list(self.deals) if self.history_available else [],
+        }
+
+    def history_order_by_ticket(self, ticket: int):
+        return {
+            "available": self.history_available,
+            "items": [item for item in self.targeted_orders if item.get("ticket") == ticket]
+            if self.history_available
+            else [],
+        }
+
+    def history_deals_by_position(self, position_ticket: int):
+        return {
+            "available": self.history_available,
+            "items": [
+                item for item in self.targeted_deals if item.get("position_id") == position_ticket
+            ]
+            if self.history_available
+            else [],
         }
 
     def send_demo_strategy_order(
@@ -324,6 +344,67 @@ class ConnectorAuditTests(unittest.TestCase):
         self.assertEqual(reconciled["status"], "reconciled")
         self.assertTrue(reconciled["evidence"]["closure_confirmed"])
         self.assertEqual(reconciled["evidence"]["filled_volume"], 0.01)
+        self.assertEqual(reconciled["evidence"]["closed_volume"], 0.01)
+        self.assertEqual(reconciled["evidence"]["weighted_close_price"], 1.101)
+
+    def test_smoke_reconciles_from_ticket_queries_when_time_window_has_no_rows(self):
+        correlation_id = "dddddddddddddddddddddddddddddddd"
+        connector = HistoryConnector(self.database, matching_history=False)
+        connector.targeted_orders = [
+            {"ticket": 801, "position_id": 800, "symbol": "EURUSD#", "volume_initial": 0.01},
+            {"ticket": 803, "position_id": 800, "symbol": "EURUSD#", "volume_initial": 0.01},
+        ]
+        connector.targeted_deals = [
+            {
+                "ticket": 802,
+                "order": 801,
+                "position_id": 800,
+                "entry": 0,
+                "symbol": "EURUSD#",
+                "volume": 0.01,
+                "price": 1.1,
+            },
+            {
+                "ticket": 804,
+                "order": 803,
+                "position_id": 800,
+                "entry": 1,
+                "symbol": "EURUSD#",
+                "volume": 0.01,
+                "price": 1.101,
+            },
+        ]
+        self.database.create_trade_audit(
+            correlation_id=correlation_id,
+            terminal_id=connector.terminal_id,
+            method="place_demo_smoke_order",
+            started_at="2026-09-24T12:00:00+00:00",
+            request={"broker_marker": f"SC{correlation_id[:10]}"},
+        )
+        self.database.update_trade_audit(
+            correlation_id,
+            status="acknowledged",
+            result={
+                "ok": True,
+                "open_order": 801,
+                "open_deal": 802,
+                "position_remains": False,
+                "close": {
+                    "ok": True,
+                    "order": 803,
+                    "deal": 804,
+                    "filled_volume": 0.01,
+                    "filled_price": 1.101,
+                },
+            },
+        )
+
+        reconciled = AuditedTradingPort(connector, self.database).reconcile(correlation_id)
+
+        self.assertEqual(reconciled["status"], "reconciled")
+        self.assertTrue(reconciled["evidence"]["match_found"])
+        self.assertEqual({item["ticket"] for item in reconciled["evidence"]["orders"]}, {801, 803})
+        self.assertEqual({item["ticket"] for item in reconciled["evidence"]["deals"]}, {802, 804})
         self.assertEqual(reconciled["evidence"]["closed_volume"], 0.01)
         self.assertEqual(reconciled["evidence"]["weighted_close_price"], 1.101)
 
