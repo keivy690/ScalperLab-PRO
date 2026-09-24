@@ -65,6 +65,14 @@ O plano de seleção/impacto de fornecedores, com etapas de contratação e inte
 - Ensaiar fechamento individual e parada de emergência em DEMO; provar que não se fecham posições quando a conta/servidor divergir ou a lista não puder ser reconciliada.
 - Medir latência, taxa de dados atrasados, divergências, falhas de reconciliação e recuperação após reinício. Não alegar prontidão por compilação ou teste isolado.
 
+### Implementação local da trilha de auditoria (2026-09-24)
+
+- `ConnectorV1` oferece consultas de histórico de ordens e negócios com limites UTC de até 31 dias. O adapter normaliza os registros para objetos serializáveis e preserva volume, preço, estado, comissão, swap, taxas e lucro.
+- `AuditedTradingPort` grava a tentativa no SQLite antes de enviar o RPC, com `correlation_id`, `terminal_id`, parâmetros operacionais e fingerprint da conta armazenado apenas como hash. O ID gera um marcador curto no comentário da ordem para permitir busca no histórico após perda da resposta.
+- Resposta, tickets, volume/preço disponíveis e snapshot de ordens, negócios e posições ficam na trilha local. Estado desconhecido, parcial, pré-envio interrompido e evidência ainda incompleta podem ser reconsultados por `POST /api/trading/audit/reconcile`; `GET /api/trading/audit` lista os registros.
+- A reconciliação é somente leitura. Sem marcador/ticket correlacionável ou se o histórico estiver indisponível, o registro permanece pendente; a aplicação não repete a ordem. Se o broker remover o comentário e a resposta tiver sido perdida, pode ser necessária revisão manual.
+- A API oficial de histórico devolve `None` em caso de erro e aceita consultas por intervalo temporal; a implementação trata erro e consulta vazia como estados diferentes. Referências: [history_orders_get](https://www.mql5.com/en/docs/python_metatrader5/mt5historyordersget_py) e [history_deals_get](https://www.mql5.com/en/docs/python_metatrader5/mt5historydealsget_py).
+
 ## Escopo já ativado no código nesta mudança
 
 - Removido o bloqueio absoluto de conta REAL no início dos dois motores e na rota de API.

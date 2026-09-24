@@ -4,7 +4,7 @@ import importlib
 import re
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .mt5_calendar_bridge import calendar_context_for_symbol, read_calendar_export
@@ -203,6 +203,65 @@ class MT5Gateway:
             return {"available": False, "detail": f"Falha ao consultar ordens ({type(exc).__name__}).",
                     "items": []}
 
+    @staticmethod
+    def _history_bounds(date_from: str, date_to: str) -> tuple[datetime, datetime]:
+        start = datetime.fromisoformat(date_from.replace("Z", "+00:00"))
+        end = datetime.fromisoformat(date_to.replace("Z", "+00:00"))
+        start = start.replace(tzinfo=timezone.utc) if start.tzinfo is None else start.astimezone(timezone.utc)
+        end = end.replace(tzinfo=timezone.utc) if end.tzinfo is None else end.astimezone(timezone.utc)
+        if start >= end or end - start > timedelta(days=31):
+            raise ValueError("Intervalo de histórico inválido; máximo permitido: 31 dias.")
+        return start, end
+
+    @_terminal_serialized
+    def history_orders(self, date_from: str, date_to: str) -> dict[str, Any]:
+        mt5 = self._connect()
+        if mt5 is None:
+            return {"available": False, "detail": self.last_error, "items": []}
+        try:
+            start, end = self._history_bounds(date_from, date_to)
+            rows = mt5.history_orders_get(start, end)
+            if rows is None:
+                return {"available": False, "detail": f"Histórico de ordens indisponível ({mt5.last_error()}).",
+                        "items": []}
+            fields = ("ticket", "time_setup", "time_setup_msc", "time_done", "time_done_msc",
+                      "type", "state", "magic", "position_id", "symbol", "volume_initial",
+                      "volume_current", "price_open", "price_current", "sl", "tp", "comment")
+            return {"available": True, "detail": None,
+                    "items": [{field: getattr(row, field) for field in fields
+                               if hasattr(row, field)} for row in rows]}
+        except Exception as exc:
+            return {"available": False, "detail": f"Falha no histórico de ordens ({type(exc).__name__}).",
+                    "items": []}
+
+    @_terminal_serialized
+    def history_deals(self, date_from: str, date_to: str) -> dict[str, Any]:
+        mt5 = self._connect()
+        if mt5 is None:
+            return {"available": False, "detail": self.last_error, "items": []}
+        try:
+            start, end = self._history_bounds(date_from, date_to)
+            rows = mt5.history_deals_get(start, end)
+            if rows is None:
+                return {"available": False, "detail": f"Histórico de negócios indisponível ({mt5.last_error()}).",
+                        "items": []}
+            fields = ("ticket", "order", "time", "time_msc", "type", "entry", "magic",
+                      "position_id", "reason", "volume", "price", "commission", "swap",
+                      "profit", "fee", "symbol", "comment")
+            return {"available": True, "detail": None,
+                    "items": [{field: getattr(row, field) for field in fields
+                               if hasattr(row, field)} for row in rows]}
+        except Exception as exc:
+            return {"available": False, "detail": f"Falha no histórico de negócios ({type(exc).__name__}).",
+                    "items": []}
+
+    @staticmethod
+    def _correlated_comment(comment: str, correlation_id: str | None) -> str:
+        if not correlation_id:
+            return comment[:31]
+        marker = f"SC{correlation_id.replace('-', '')[:10]}"
+        return f"{marker} {comment}"[:31]
+
     def submit_order(self, order: dict[str, Any]) -> dict[str, Any]:
         """Submit only through the existing explicitly armed, risk-checked order paths."""
         engine = order.get("engine")
@@ -219,8 +278,10 @@ class MT5Gateway:
                 float(order["volume"]), float(order["stop"]), float(order["target"]))
         if engine == "strategy":
             return sender(*args, order.get("strategy_id", 1),
-                          str(order["account_fingerprint"]), float(order["risk_cash"]))
-        return sender(*args, str(order["account_fingerprint"]), float(order["risk_cash"]))
+                          str(order["account_fingerprint"]), float(order["risk_cash"]),
+                          correlation_id=order.get("correlation_id"))
+        return sender(*args, str(order["account_fingerprint"]), float(order["risk_cash"]),
+                      correlation_id=order.get("correlation_id"))
 
     @_terminal_serialized
     def state(self) -> dict[str, Any]:
@@ -462,44 +523,50 @@ class MT5Gateway:
     def send_demo_strategy_order(self, symbol_name: str, side: str, volume: float,
                                  stop: float, target: float, strategy_id: int,
                                  expected_account_fingerprint: str | None = None,
-                                 risk_cash: float | None = None) -> dict[str, Any]:
+                                 risk_cash: float | None = None,
+                                 correlation_id: str | None = None) -> dict[str, Any]:
         """Single demo-only market request. Ambiguous results are never retried."""
         with self._trade_lock, self._lock:
             return self._send_account_order(
                 symbol_name, side, volume, stop, target, strategy_id, expected_account_fingerprint,
-                "strategy", risk_cash=risk_cash)
+                "strategy", risk_cash=risk_cash, correlation_id=correlation_id)
 
     def send_real_strategy_order(self, symbol_name: str, side: str, volume: float,
                                  stop: float, target: float, strategy_id: int,
                                  expected_account_fingerprint: str | None = None,
-                                 risk_cash: float | None = None) -> dict[str, Any]:
+                                 risk_cash: float | None = None,
+                                 correlation_id: str | None = None) -> dict[str, Any]:
         with self._trade_lock, self._lock:
             return self._send_account_order(symbol_name, side, volume, stop, target,
                 strategy_id, expected_account_fingerprint, "strategy", risk_cash=risk_cash,
-                mode="REAL")
+                mode="REAL", correlation_id=correlation_id)
 
     def send_demo_analyst_order(self, symbol_name: str, side: str, volume: float,
                                 stop: float, target: float,
                                 expected_account_fingerprint: str | None = None,
                                 risk_cash: float | None = None,
                                 max_spread: float | None = None,
-                                min_reward_risk: float | None = None) -> dict[str, Any]:
+                                min_reward_risk: float | None = None,
+                                correlation_id: str | None = None) -> dict[str, Any]:
         """Independent DEMO-only order path for the market analyst; never retries ambiguous sends."""
         with self._trade_lock, self._lock:
             return self._send_account_order(
                 symbol_name, side, volume, stop, target, 998, expected_account_fingerprint, "analyst",
-                risk_cash=risk_cash, max_spread=max_spread, min_reward_risk=min_reward_risk)
+                risk_cash=risk_cash, max_spread=max_spread, min_reward_risk=min_reward_risk,
+                correlation_id=correlation_id)
 
     def send_real_analyst_order(self, symbol_name: str, side: str, volume: float,
                                 stop: float, target: float,
                                 expected_account_fingerprint: str | None = None,
                                 risk_cash: float | None = None,
                                 max_spread: float | None = None,
-                                min_reward_risk: float | None = None) -> dict[str, Any]:
+                                min_reward_risk: float | None = None,
+                                correlation_id: str | None = None) -> dict[str, Any]:
         with self._trade_lock, self._lock:
             return self._send_account_order(symbol_name, side, volume, stop, target, 998,
                 expected_account_fingerprint, "analyst", risk_cash=risk_cash,
-                max_spread=max_spread, min_reward_risk=min_reward_risk, mode="REAL")
+                max_spread=max_spread, min_reward_risk=min_reward_risk, mode="REAL",
+                correlation_id=correlation_id)
 
     def _send_account_order(self, symbol_name: str, side: str, volume: float,
                                   stop: float, target: float, strategy_id: int,
@@ -507,7 +574,8 @@ class MT5Gateway:
                                   engine: str = "strategy", risk_cash: float | None = None,
                                   max_spread: float | None = None,
                                   min_reward_risk: float | None = None,
-                                  mode: str = "DEMO") -> dict[str, Any]:
+                                  mode: str = "DEMO",
+                                  correlation_id: str | None = None) -> dict[str, Any]:
         symbol_name = self.resolve_broker_symbol(symbol_name)
         armed = self.analyst_engine_armed if engine == "analyst" else self.strategy_engine_armed
         if not armed or self._engine_armed_mode != mode:
@@ -577,6 +645,7 @@ class MT5Gateway:
                        "sl": stop, "tp": target, "deviation": 20,
                        "magic": magic, "comment": comment, "type_time": mt5.ORDER_TIME_GTC,
                        "type_filling": self._filling(mt5, symbol)}
+            request["comment"] = self._correlated_comment(comment, correlation_id)
             if int(getattr(symbol, "trade_exemode", -1)) != getattr(mt5, "SYMBOL_TRADE_EXECUTION_MARKET", 2):
                 request["price"] = price
             check = mt5.order_check(request)
@@ -602,24 +671,39 @@ class MT5Gateway:
             try:
                 result = mt5.order_send(request)
             except Exception as exc:
-                return {"ok": False, "unknown": True, "detail": f"Resultado do envio desconhecido ({type(exc).__name__}); não reenvie antes de conferir posições/histórico."}
+                return {"ok": False, "unknown": True, "no_retry": True,
+                        "correlation_id": correlation_id,
+                        "detail": f"Resultado do envio desconhecido ({type(exc).__name__}); não reenvie antes de conferir posições/histórico."}
             if result is None:
-                return {"ok": False, "unknown": True, "detail": f"MT5 não confirmou o envio ({mt5.last_error()}); não reenvie antes da reconciliação."}
+                return {"ok": False, "unknown": True, "no_retry": True,
+                        "correlation_id": correlation_id,
+                        "detail": f"MT5 não confirmou o envio ({mt5.last_error()}); não reenvie antes da reconciliação."}
             accepted = {getattr(mt5, "TRADE_RETCODE_DONE", 10009),
                         getattr(mt5, "TRADE_RETCODE_DONE_PARTIAL", 10010)}
             if result.retcode not in accepted:
-                return {"ok": False, "detail": f"MT5 rejeitou a ordem (retcode {result.retcode}); sinal consumido até a próxima sessão."}
+                return {"ok": False, "retcode": int(result.retcode),
+                        "correlation_id": correlation_id,
+                        "detail": f"MT5 rejeitou a ordem (retcode {result.retcode}); sinal consumido até a próxima sessão."}
             after = mt5.positions_get(symbol=symbol_name)
-            matches = [p for p in (after or []) if int(p.magic) == magic and str(p.comment).startswith(comment)]
+            marker = f"SC{correlation_id.replace('-', '')[:10]}" if correlation_id else None
+            matches = [p for p in (after or []) if int(p.magic) == magic and (
+                str(p.comment).startswith(comment) or (marker and marker in str(p.comment)))]
             if after is None or len(matches) != 1:
-                return {"ok": False, "unknown": True, "detail": "Ordem aceita sem reconciliação inequívoca; não haverá repetição. Confira o MT5.",
+                return {"ok": False, "unknown": True, "no_retry": True,
+                        "correlation_id": correlation_id,
+                        "detail": "Ordem aceita sem reconciliação inequívoca; não haverá repetição. Confira o MT5.",
                         "order": int(getattr(result, "order", 0)), "deal": int(getattr(result, "deal", 0))}
             position = matches[0]
             if not float(position.sl) or not float(position.tp):
                 return {"ok": False, "unknown": True, "position_may_remain": True,
+                        "correlation_id": correlation_id,
                         "detail": "Posição encontrada sem stop/alvo confirmados no servidor. Motor interrompido; verifique o MT5 manualmente.",
                         "ticket": int(position.ticket)}
-            return {"ok": True, "ticket": int(position.ticket), "order": int(getattr(result, "order", 0)),
+            return {"ok": True, "correlation_id": correlation_id, "symbol": symbol_name,
+                    "side": side, "requested_volume": float(volume),
+                    "requested_price": price, "filled_volume": float(position.volume),
+                    "filled_price": float(position.price_open), "retcode": int(result.retcode),
+                    "ticket": int(position.ticket), "order": int(getattr(result, "order", 0)),
                     "deal": int(getattr(result, "deal", 0)), "volume": float(position.volume),
                     "price": float(position.price_open), "sl": float(position.sl), "tp": float(position.tp),
                     "detail": f"Ordem {mode} confirmada com stop e alvo reconciliados no MT5."}
@@ -647,9 +731,11 @@ class MT5Gateway:
         return {"ok": True, "detail": "Fechamento de posições em DEMO habilitado até o aplicativo ser encerrado."}
 
     def close_demo_position(self, ticket: int, confirmation: str,
-                            expected_account_fingerprint: str | None = None) -> dict[str, Any]:
+                            expected_account_fingerprint: str | None = None,
+                            correlation_id: str | None = None) -> dict[str, Any]:
         with self._trade_lock, self._lock:
-            return self._close_demo_position(ticket, confirmation, expected_account_fingerprint)
+            return self._close_demo_position(ticket, confirmation, expected_account_fingerprint,
+                                             correlation_id)
 
     def arm_real_closing(self, confirmation: str) -> dict[str, Any]:
         if confirmation != "AUTORIZO FECHAMENTO EM CONTA REAL":
@@ -666,7 +752,8 @@ class MT5Gateway:
         return {"ok": True, "detail": "Fechamento individual REAL armado para esta sessão e conta."}
 
     def close_real_position(self, ticket: int, confirmation: str,
-                            expected_account_fingerprint: str | None = None) -> dict[str, Any]:
+                            expected_account_fingerprint: str | None = None,
+                            correlation_id: str | None = None) -> dict[str, Any]:
         with self._trade_lock, self._lock:
             if confirmation != "FECHAR POSIÇÃO REAL":
                 return {"ok": False, "detail": "Confirmação incorreta; nenhuma ordem foi enviada."}
@@ -681,10 +768,11 @@ class MT5Gateway:
             if (not state.get("terminal", {}).get("trade_allowed")
                     or not account.get("trade_allowed") or not account.get("trade_expert")):
                 return {"ok": False, "detail": "Negociação desabilitada no terminal."}
-            return self._close_position_market(ticket, fingerprint, "REAL")
+            return self._close_position_market(ticket, fingerprint, "REAL", correlation_id)
 
     def _close_demo_position(self, ticket: int, confirmation: str,
-                             expected_account_fingerprint: str | None = None) -> dict[str, Any]:
+                             expected_account_fingerprint: str | None = None,
+                             correlation_id: str | None = None) -> dict[str, Any]:
         if confirmation != "FECHAR POSIÇÃO DEMO":
             return {"ok": False, "detail": "Confirmação incorreta; nenhuma ordem foi enviada."}
         state = self.state()
@@ -709,9 +797,10 @@ class MT5Gateway:
         mt5 = self._connect()
         if mt5 is None:
             return {"ok": False, "detail": self.last_error or "MT5 indisponível."}
-        return self._close_position_market(ticket, fingerprint, "DEMO")
+        return self._close_position_market(ticket, fingerprint, "DEMO", correlation_id)
 
-    def _close_position_market(self, ticket: int, fingerprint: str, mode: str) -> dict[str, Any]:
+    def _close_position_market(self, ticket: int, fingerprint: str, mode: str,
+                               correlation_id: str | None = None) -> dict[str, Any]:
         mt5 = self._connect()
         if mt5 is None:
             return {"ok": False, "detail": self.last_error or "MT5 indisponível."}
@@ -727,16 +816,19 @@ class MT5Gateway:
         request = {"action": mt5.TRADE_ACTION_DEAL, "symbol": position.symbol, "volume": float(position.volume),
                    "type": mt5.ORDER_TYPE_BUY if closing_buy else mt5.ORDER_TYPE_SELL,
                    "position": int(position.ticket), "price": float(tick.ask if closing_buy else tick.bid),
-                   "deviation": 20, "magic": int(position.magic), "comment": f"ScalperLab {mode.lower()} close",
+                   "deviation": 20, "magic": int(position.magic),
+                   "comment": f"ScalperLab {mode.lower()} close",
                    "type_time": mt5.ORDER_TIME_GTC, "type_filling": self._filling(mt5, symbol)}
-        return self._send_and_reconcile(mt5, request, int(ticket), fingerprint, mode)
+        return self._send_and_reconcile(mt5, request, int(ticket), fingerprint, mode, correlation_id)
 
-    def place_demo_smoke_order(self, confirmation: str) -> dict[str, Any]:
+    def place_demo_smoke_order(self, confirmation: str,
+                               correlation_id: str | None = None) -> dict[str, Any]:
         """Send one minimum-size EURUSD demo buy, reconcile it, then request its close."""
         with self._trade_lock, self._lock:
-            return self._place_demo_smoke_order(confirmation)
+            return self._place_demo_smoke_order(confirmation, correlation_id)
 
-    def _place_demo_smoke_order(self, confirmation: str) -> dict[str, Any]:
+    def _place_demo_smoke_order(self, confirmation: str,
+                                correlation_id: str | None = None) -> dict[str, Any]:
         if confirmation != "ENVIAR TESTE DEMO":
             return {"ok": False, "detail": "Confirmação incorreta; nenhuma ordem foi enviada."}
         state = self.state()
@@ -781,7 +873,8 @@ class MT5Gateway:
         comment = "SL1 demo test"
         request = {"action": mt5.TRADE_ACTION_DEAL, "symbol": symbol.name, "volume": volume,
                    "type": mt5.ORDER_TYPE_BUY, "price": float(tick.ask), "deviation": 20,
-                   "magic": magic, "comment": comment, "type_time": mt5.ORDER_TIME_GTC,
+                   "magic": magic, "comment": self._correlated_comment(comment, correlation_id),
+                   "type_time": mt5.ORDER_TIME_GTC,
                    "type_filling": self._filling(mt5, symbol)}
         try:
             check = mt5.order_check(request)
@@ -806,21 +899,23 @@ class MT5Gateway:
             opened = mt5.order_send(request)
         except Exception as exc:
             return {"ok": False, "unknown": True, "position_may_remain": True,
-                    "no_retry": True,
+                    "no_retry": True, "correlation_id": correlation_id,
                     "detail": f"Resultado da ordem de teste desconhecido ({type(exc).__name__}); consulte o terminal antes de qualquer nova tentativa."}
         if opened is None:
             return {"ok": False, "unknown": True, "position_may_remain": True,
-                    "no_retry": True,
+                    "no_retry": True, "correlation_id": correlation_id,
                     "detail": f"O terminal não confirmou a ordem ({mt5.last_error()}); consulte posições/histórico, sem reenviar."}
         accepted = {getattr(mt5, "TRADE_RETCODE_DONE", 10009), getattr(mt5, "TRADE_RETCODE_DONE_PARTIAL", 10010)}
         if opened.retcode not in accepted:
             return {"ok": False, "detail": f"MT5 rejeitou a ordem de teste (retcode {opened.retcode})."}
 
         reconciled = mt5.positions_get(symbol=symbol.name)
-        matches = [position for position in (reconciled or [])
-                   if int(position.magic) == magic and str(position.comment).startswith(comment)]
+        marker = f"SC{correlation_id.replace('-', '')[:10]}" if correlation_id else None
+        matches = [position for position in (reconciled or []) if int(position.magic) == magic and (
+            str(position.comment).startswith(comment) or (marker and marker in str(position.comment)))]
         if reconciled is None or len(matches) != 1:
             return {"ok": False, "unknown": True, "position_may_remain": True,
+                    "correlation_id": correlation_id,
                     "detail": "Ordem aceita, mas a posição de teste não foi identificada com segurança. Não haverá repetição nem fechamento de posição desconhecida; confira o MT5.",
                     "symbol": symbol.name, "volume": volume, "open_order": int(getattr(opened, "order", 0)),
                     "open_deal": int(getattr(opened, "deal", 0))}
@@ -829,7 +924,8 @@ class MT5Gateway:
         self.demo_armed = True
         self._demo_armed_account_fingerprint = expected_account_fingerprint
         close_result = self.close_demo_position(int(test_position.ticket), "FECHAR POSIÇÃO DEMO",
-                                                expected_account_fingerprint=expected_account_fingerprint)
+                                                expected_account_fingerprint=expected_account_fingerprint,
+                                                correlation_id=correlation_id)
         self.demo_armed = False
         self._demo_armed_account_fingerprint = None
         self.real_close_armed = False
@@ -837,25 +933,33 @@ class MT5Gateway:
         after = self.positions()
         our_position_remains = any(item.get("magic") == magic for item in after.get("items", [])) if after.get("available") else None
         ok = bool(close_result.get("ok") and after.get("available") and our_position_remains is False)
-        return {"ok": ok, "symbol": symbol.name, "side": "BUY", "volume": volume,
+        return {"ok": ok, "correlation_id": correlation_id, "symbol": symbol.name,
+                "side": "BUY", "requested_volume": volume,
+                "filled_volume": float(test_position.volume),
+                "filled_price": float(test_position.price_open),
+                "open_retcode": int(opened.retcode), "volume": volume,
                 "open_order": int(getattr(opened, "order", 0)), "open_deal": int(getattr(opened, "deal", 0)),
                 "close": close_result, "position_remains": our_position_remains,
                 "detail": "Ordem demo aberta, confirmada e fechada; posição reconciliada como encerrada." if ok
                 else "A ordem demo foi aberta. O fechamento não foi confirmado; atualize posições no MT5 antes de nova ação.",
                 "no_retry": True}
 
-    def emergency_stop_demo(self, confirmation: str) -> dict[str, Any]:
+    def emergency_stop_demo(self, confirmation: str,
+                            correlation_id: str | None = None) -> dict[str, Any]:
         with self._trade_lock, self._lock:
-            return self._emergency_stop_demo(confirmation)
+            return self._emergency_stop_demo(confirmation, correlation_id)
 
-    def emergency_stop_real(self, confirmation: str) -> dict[str, Any]:
+    def emergency_stop_real(self, confirmation: str,
+                            correlation_id: str | None = None) -> dict[str, Any]:
         with self._trade_lock, self._lock:
-            return self._emergency_stop_account(confirmation, "REAL")
+            return self._emergency_stop_account(confirmation, "REAL", correlation_id)
 
-    def _emergency_stop_demo(self, confirmation: str) -> dict[str, Any]:
-        return self._emergency_stop_account(confirmation, "DEMO")
+    def _emergency_stop_demo(self, confirmation: str,
+                             correlation_id: str | None = None) -> dict[str, Any]:
+        return self._emergency_stop_account(confirmation, "DEMO", correlation_id)
 
-    def _emergency_stop_account(self, confirmation: str, mode: str) -> dict[str, Any]:
+    def _emergency_stop_account(self, confirmation: str, mode: str,
+                                correlation_id: str | None = None) -> dict[str, Any]:
         def finish(result: dict[str, Any], status: str, *, remaining_count=None, reconciled=False):
             result = {**result, "status": status, "remaining_count": remaining_count,
                       "reconciled": bool(reconciled)}
@@ -895,7 +999,8 @@ class MT5Gateway:
             self.demo_armed = True
             self._demo_armed_account_fingerprint = expected_account_fingerprint
             results = [self.close_demo_position(item["ticket"], "FECHAR POSIÇÃO DEMO",
-                                                expected_account_fingerprint=expected_account_fingerprint)
+                                                expected_account_fingerprint=expected_account_fingerprint,
+                                                correlation_id=correlation_id)
                        for item in positions["items"]]
             self.demo_armed = False
             self._demo_armed_account_fingerprint = None
@@ -903,7 +1008,8 @@ class MT5Gateway:
             self.real_close_armed = True
             self._real_close_account_fingerprint = expected_account_fingerprint
             results = [self.close_real_position(item["ticket"], "FECHAR POSIÇÃO REAL",
-                                                 expected_account_fingerprint=expected_account_fingerprint)
+                                                 expected_account_fingerprint=expected_account_fingerprint,
+                                                 correlation_id=correlation_id)
                        for item in positions["items"]]
             self.real_close_armed = False
             self._real_close_account_fingerprint = None
@@ -929,7 +1035,9 @@ class MT5Gateway:
         return mt5.ORDER_FILLING_RETURN
 
     def _send_and_reconcile(self, mt5, request: dict[str, Any], ticket: int,
-                            expected_account_fingerprint: str, mode: str = "DEMO") -> dict[str, Any]:
+                            expected_account_fingerprint: str, mode: str = "DEMO",
+                            correlation_id: str | None = None) -> dict[str, Any]:
+        request["comment"] = self._correlated_comment(request.get("comment", ""), correlation_id)
         try:
             check = mt5.order_check(request)
         except Exception as exc:
@@ -949,15 +1057,27 @@ class MT5Gateway:
         try:
             result = mt5.order_send(request)
         except Exception as exc:
-            return {"ok": False, "unknown": True, "detail": f"Resultado do envio desconhecido ({type(exc).__name__}); atualize posições e histórico antes de qualquer nova ação."}
+            return {"ok": False, "unknown": True, "no_retry": True,
+                    "correlation_id": correlation_id,
+                    "detail": f"Resultado do envio desconhecido ({type(exc).__name__}); atualize posições e histórico antes de qualquer nova ação."}
         if result is None:
-            return {"ok": False, "unknown": True, "detail": f"MT5 não confirmou o envio ({mt5.last_error()}); não reenvie antes da reconciliação."}
+            return {"ok": False, "unknown": True, "no_retry": True,
+                    "correlation_id": correlation_id,
+                    "detail": f"MT5 não confirmou o envio ({mt5.last_error()}); não reenvie antes da reconciliação."}
         accepted = {getattr(mt5, "TRADE_RETCODE_DONE", 10009), getattr(mt5, "TRADE_RETCODE_DONE_PARTIAL", 10010)}
         if result.retcode not in accepted:
-            return {"ok": False, "detail": f"MT5 rejeitou a ordem (retcode {result.retcode}); posição {ticket} não foi confirmada como fechada."}
+            return {"ok": False, "retcode": int(result.retcode),
+                    "correlation_id": correlation_id,
+                    "detail": f"MT5 rejeitou a ordem (retcode {result.retcode}); posição {ticket} não foi confirmada como fechada."}
         remaining = mt5.positions_get(ticket=ticket)
+        prior_volume = float(current[0].volume)
+        remaining_volume = sum(float(position.volume) for position in (remaining or []))
         return {"ok": remaining is not None and len(remaining) == 0,
                 "partial": bool(remaining), "unknown": remaining is None,
+                "correlation_id": correlation_id, "requested_volume": prior_volume,
+                "filled_volume": max(0.0, prior_volume - remaining_volume),
+                "filled_price": float(getattr(result, "price", 0.0)),
+                "remaining_volume": remaining_volume,
                 "detail": "Posição reconciliada como fechada." if remaining is not None and len(remaining) == 0
                 else "Envio aceito, mas posição remanescente/estado desconhecido; atualize antes de nova ação.",
                 "retcode": int(result.retcode), "order": int(getattr(result, "order", 0)),

@@ -53,6 +53,15 @@ class WebTests(unittest.TestCase):
         )
         self.assertEqual(direct_order.status_code, 404)
 
+    def test_trade_audit_routes_require_session_and_return_empty_ledger(self):
+        self.assertEqual(self.client.get("/api/trading/audit").status_code, 403)
+        audit = self.client.get("/api/trading/audit", headers=self.headers)
+        self.assertEqual(audit.status_code, 200)
+        self.assertEqual(audit.json["items"], [])
+        reconcile = self.client.post("/api/trading/audit/reconcile", headers=self.headers, json={})
+        self.assertEqual(reconcile.status_code, 200)
+        self.assertEqual(reconcile.json["items"], [])
+
     def test_home_embeds_per_process_token(self):
         response = self.client.get("/", headers={"Host": "127.0.0.1:5000"})
         self.assertEqual(response.status_code, 200)

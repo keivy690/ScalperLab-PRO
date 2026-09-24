@@ -9,6 +9,7 @@ from flask import Flask, jsonify, render_template, request
 
 from .ai_assistant import AIAssistant
 from .config import MAX_REQUEST_BYTES
+from .connectors.audit import AuditedTradingPort
 from .connectors.manager import ConnectorManager
 from .db import Database
 from .execution_engine import ExecutionEngine
@@ -30,7 +31,16 @@ def create_app(*, database: Database | None = None, mt5: MT5Gateway | None = Non
     app.extensions["scalper_db"] = database or Database()
     connector_manager = ConnectorManager()
     app.extensions["scalper_connector_manager"] = connector_manager
-    app.extensions["scalper_mt5"] = mt5 or connector_manager.get_connector(terminal_id)
+    connector = mt5 or connector_manager.get_connector(terminal_id)
+    connector_terminal_id = getattr(connector, "terminal_id", terminal_id)
+    terminal_config = next((item for item in connector_manager.terminals()
+                            if item.terminal_id == connector_terminal_id), None)
+    audited_connector = AuditedTradingPort(
+        connector, app.extensions["scalper_db"],
+        symbol_mappings=terminal_config.symbol_mappings if terminal_config else None)
+    app.extensions["scalper_connector"] = connector
+    app.extensions["scalper_order_audit"] = audited_connector
+    app.extensions["scalper_mt5"] = audited_connector
     app.extensions["scalper_research"] = ResearchService(app.extensions["scalper_db"])
     app.extensions["scalper_ai"] = AIAssistant()
     app.extensions["scalper_engine"] = ExecutionEngine(
@@ -274,6 +284,18 @@ def create_app(*, database: Database | None = None, mt5: MT5Gateway | None = Non
     @app.get("/api/orders")
     def orders():
         return jsonify(app.extensions["scalper_mt5"].positions())
+
+    @app.get("/api/trading/audit")
+    def trading_audit():
+        return jsonify(items=app.extensions["scalper_order_audit"].list())
+
+    @app.post("/api/trading/audit/reconcile")
+    def reconcile_trading_audit():
+        data = _json_body() or {}
+        correlation_id = _bounded(data.get("correlation_id"), 80) or None
+        results = app.extensions["scalper_order_audit"].reconcile_pending(
+            correlation_id=correlation_id, limit=50)
+        return jsonify(items=results)
 
     @app.post("/api/trading/arm-demo")
     def arm_demo():

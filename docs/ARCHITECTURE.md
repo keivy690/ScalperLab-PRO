@@ -31,6 +31,14 @@ Estratégias e analista recebem `TradingPort`; não importam o pacote `MetaTrade
 
 Cada configuração tem `terminal_id` independente, caminho opcional do executável, símbolos selecionados e mapa canônico. O gerenciador cria conectores sob demanda e aceita caminhos de múltiplas instalações; cada worker carrega seu próprio estado da biblioteca MT5. A descoberta local apenas sugere caminhos encontrados; não inicia terminais nem altera configurações.
 
+## Auditoria e reconciliação de ordens
+
+`AuditedTradingPort` envolve as ações de envio e fechamento usadas pela API, pelo motor e pelo analista. Antes do RPC, grava `correlation_id`, terminal, método, hora UTC, símbolo canônico/do broker, parâmetros operacionais e hash curto do fingerprint da conta; confirmação textual e fingerprint em texto claro não são persistidos. O mesmo ID gera um marcador `SC...` dentro do limite de 31 caracteres do comentário enviado ao MT5.
+
+O resultado imediato registra estado, tickets, volume/preço disponíveis e retcode. A leitura subsequente consulta histórico de ordens, histórico de negócios e posições. Para ações ambíguas ou evidência incompleta, `POST /api/trading/audit/reconcile` repete apenas essas consultas de leitura. `GET /api/trading/audit` expõe a trilha local autenticada. Estados sem correspondência conclusiva permanecem pendentes; nenhuma rota de reconciliação reenvia, modifica ou fecha uma ordem. As consultas de histórico aceitam intervalos UTC limitados a 31 dias.
+
+O marcador pode ser alterado ou removido pelo broker. Nesse caso, tickets retornados pelo MT5 ainda permitem correspondência; se o resultado também se perdeu e o histórico não contém o marcador, o item continua pendente para revisão manual. A trilha cobre as ações iniciadas pelo ScalperLab e não inventaria uma correlação para operações manuais ou de outro programa.
+
 O backend aceita corpos HTTP de até 3 MB. A pesquisa aceita até 12 feeds e aplica um orçamento global de 35 segundos, usando conexão HTTPS direta para preservar a verificação do endereço do servidor; redes que exigem proxy explícito podem não conseguir coletar fontes nesta versão.
 
 Tetos codificados: 0,01 lote, uma tentativa por sessão para ORB/gap e por candle D1 fechado nas regras diárias, nenhuma posição preexistente por conta e perda diária de 0,1–1% (limite escolhido no perfil). Risco por ordem é limitado a 0,25% e o lote é calculado com `order_calc_profit`; estimativa não inclui comissão, swap, slippage, gaps ou falha de stop. Ao parar o motor, posições abertas permanecem no MT5 e dependem de SL/TP aceitos pelo servidor ou ação posterior do usuário. Ao reiniciar o app, o motor permanece parado.

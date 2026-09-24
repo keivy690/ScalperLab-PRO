@@ -1,6 +1,7 @@
 import threading
 import time
 import unittest
+from datetime import timezone
 from types import SimpleNamespace
 
 from scalperlab.mt5_gateway import MT5Gateway
@@ -30,10 +31,14 @@ class FakeMT5:
                                           price_open=1.08, price_current=1.081, sl=0.0,
                                           tp=0.0, profit=1.0, time=1, magic=5, comment="")]
         self.sent = 0
+        self.requests = []
         self.initialize_count = 0
         self.account_login = 42
         self.account_server = "Demo"
         self.pending_orders = []
+        self.historical_orders = []
+        self.historical_deals = []
+        self.history_query_bounds = None
         self.order_check_hook = None
         self.test_symbol = SimpleNamespace(name="EURUSD#", trade_mode=4, order_mode=127,
                                            volume_min=0.01, filling_mode=2)
@@ -59,6 +64,12 @@ class FakeMT5:
             rows = [position for position in rows if position.symbol == symbol]
         return rows
     def orders_get(self): return list(self.pending_orders)
+    def history_orders_get(self, start, end):
+        self.history_query_bounds = (start, end)
+        return list(self.historical_orders)
+    def history_deals_get(self, start, end):
+        self.history_query_bounds = (start, end)
+        return list(self.historical_deals)
     def order_calc_profit(self, *_args): return -1.0
     def order_calc_margin(self, *_args): return 10.0
     def symbol_info_tick(self, _symbol): return SimpleNamespace(ask=1.082, bid=1.081)
@@ -70,6 +81,7 @@ class FakeMT5:
         return SimpleNamespace(retcode=0)
     def order_send(self, request):
         self.sent += 1
+        self.requests.append(dict(request))
         if request.get("magic") == 209221001 and request["action"] == self.TRADE_ACTION_DEAL and request.get("position") is None:
             self.positions.append(SimpleNamespace(ticket=99, symbol=request["symbol"], type=0, volume=request["volume"],
                                                   price_open=request["price"], price_current=request["price"], sl=0,
@@ -87,6 +99,35 @@ class FakeMT5:
 
 
 class MT5GatewayTests(unittest.TestCase):
+    def test_history_queries_use_utc_and_serialize_order_and_deal_fields(self):
+        mt5 = FakeMT5()
+        mt5.historical_orders = [SimpleNamespace(ticket=71, time_setup=100, time_done=101,
+                                                 type=0, state=4, magic=5, position_id=70,
+                                                 symbol="EURUSD#", volume_initial=0.01,
+                                                 volume_current=0.0, price_open=1.1,
+                                                 comment="SC0123456789 entry")]
+        mt5.historical_deals = [SimpleNamespace(ticket=72, order=71, time=101, time_msc=101000,
+                                                type=0, entry=0, magic=5, position_id=70,
+                                                volume=0.01, price=1.1, commission=-0.1,
+                                                swap=0.0, profit=0.0, fee=0.0,
+                                                symbol="EURUSD#", comment="SC0123456789 entry")]
+        gateway = MT5Gateway(mt5)
+        orders = gateway.history_orders("2026-09-24T12:00:00Z", "2026-09-24T12:01:00Z")
+        start, end = mt5.history_query_bounds
+        self.assertTrue(orders["available"])
+        self.assertEqual(orders["items"][0]["ticket"], 71)
+        self.assertEqual(start.tzinfo, timezone.utc)
+        self.assertEqual(end.tzinfo, timezone.utc)
+        deals = gateway.history_deals("2026-09-24T12:00:00+00:00", "2026-09-24T12:01:00+00:00")
+        self.assertTrue(deals["available"])
+        self.assertEqual(deals["items"][0]["commission"], -0.1)
+
+    def test_history_query_refuses_invalid_or_unbounded_interval(self):
+        gateway = MT5Gateway(FakeMT5())
+        result = gateway.history_orders("2026-01-01T00:00:00Z", "2026-03-01T00:00:00Z")
+        self.assertFalse(result["available"])
+        self.assertEqual(result["items"], [])
+
     def test_real_account_never_arms_demo_or_submits_order(self):
         mt5 = FakeMT5(mode=2)
         gateway = MT5Gateway(mt5)
@@ -166,6 +207,17 @@ class MT5GatewayTests(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertFalse(result.get("unknown", False))
         self.assertEqual(mt5.sent, 0)
+        self.assertEqual(mt5.positions, [])
+
+    def test_demo_smoke_order_preserves_correlation_marker_on_open_and_close(self):
+        mt5 = FakeMT5()
+        mt5.positions = []
+        correlation_id = "0123456789abcdef0123456789abcdef"
+        result = MT5Gateway(mt5).place_demo_smoke_order("ENVIAR TESTE DEMO", correlation_id)
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["correlation_id"], correlation_id)
+        self.assertEqual(len(mt5.requests), 2)
+        self.assertTrue(all("SC0123456789" in request["comment"] for request in mt5.requests))
         self.assertEqual(mt5.positions, [])
 
     def test_demo_smoke_order_send_exception_is_unknown_and_never_retried(self):

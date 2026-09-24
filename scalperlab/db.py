@@ -71,6 +71,19 @@ class Database:
                     message TEXT NOT NULL,
                     created_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS trade_audit (
+                    correlation_id TEXT PRIMARY KEY,
+                    terminal_id TEXT NOT NULL,
+                    method TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    started_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    request_json TEXT NOT NULL,
+                    result_json TEXT NOT NULL DEFAULT '{}',
+                    evidence_json TEXT NOT NULL DEFAULT '{}'
+                );
+                CREATE INDEX IF NOT EXISTS idx_trade_audit_status_updated
+                    ON trade_audit(status, updated_at DESC);
                 CREATE TABLE IF NOT EXISTS engine_runtime (
                     id INTEGER PRIMARY KEY CHECK (id = 1),
                     config_json TEXT NOT NULL DEFAULT '{}',
@@ -224,6 +237,64 @@ class Database:
                 (max(1, min(limit, 100)),),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def create_trade_audit(self, *, correlation_id: str, terminal_id: str, method: str,
+                           started_at: str, request: dict[str, Any]) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """INSERT INTO trade_audit
+                (correlation_id, terminal_id, method, status, started_at, updated_at, request_json)
+                VALUES (?, ?, ?, 'prepared', ?, ?, ?)""",
+                (correlation_id, terminal_id, method, started_at, now_iso(),
+                 json.dumps(request, ensure_ascii=False, default=str)),
+            )
+
+    def update_trade_audit(self, correlation_id: str, *, status: str,
+                           result: dict[str, Any] | None = None,
+                           evidence: dict[str, Any] | None = None) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """UPDATE trade_audit SET status = ?, updated_at = ?,
+                result_json = COALESCE(?, result_json),
+                evidence_json = COALESCE(?, evidence_json)
+                WHERE correlation_id = ?""",
+                (status, now_iso(),
+                 json.dumps(result, ensure_ascii=False, default=str) if result is not None else None,
+                 json.dumps(evidence, ensure_ascii=False, default=str) if evidence is not None else None,
+                 correlation_id),
+            )
+
+    def get_trade_audit(self, correlation_id: str) -> dict[str, Any] | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM trade_audit WHERE correlation_id = ?", (correlation_id,)
+            ).fetchone()
+        return self._trade_audit(row) if row else None
+
+    def list_trade_audit(self, *, limit: int = 100,
+                         statuses: set[str] | None = None) -> list[dict[str, Any]]:
+        with self.connect() as connection:
+            if statuses:
+                placeholders = ",".join("?" for _ in statuses)
+                rows = connection.execute(
+                    f"SELECT * FROM trade_audit WHERE status IN ({placeholders}) "
+                    "ORDER BY started_at DESC LIMIT ?",
+                    (*sorted(statuses), max(1, min(limit, 500))),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    "SELECT * FROM trade_audit ORDER BY started_at DESC LIMIT ?",
+                    (max(1, min(limit, 500)),),
+                ).fetchall()
+        return [self._trade_audit(row) for row in rows]
+
+    @staticmethod
+    def _trade_audit(row: sqlite3.Row) -> dict[str, Any]:
+        item = dict(row)
+        item["request"] = json.loads(item.pop("request_json"))
+        item["result"] = json.loads(item.pop("result_json"))
+        item["evidence"] = json.loads(item.pop("evidence_json"))
+        return item
 
     @staticmethod
     def _strategy(row: sqlite3.Row) -> dict[str, Any]:

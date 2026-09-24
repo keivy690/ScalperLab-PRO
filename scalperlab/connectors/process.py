@@ -35,7 +35,8 @@ class ConnectorHealth:
 
 _REMOTE_METHODS = {
     "terminal_state", "account_state", "available_symbols", "market_watch_symbols",
-    "tick", "rates", "orders", "positions", "submit_order", "state",
+    "tick", "rates", "orders", "positions", "history_orders", "history_deals",
+    "submit_order", "state",
     "validate_market_symbols", "strategy_market_data", "current_tick", "economic_calendar",
     "risk_volume", "arm_order_engine", "disarm_order_engine",
     "send_demo_strategy_order", "send_real_strategy_order",
@@ -317,6 +318,14 @@ class ProcessMT5Connector:
         ok, result = self._rpc("positions")
         return result if ok else {"available": False, "detail": result, "items": []}
 
+    def history_orders(self, date_from: str, date_to: str) -> dict[str, Any]:
+        ok, result = self._rpc("history_orders", date_from, date_to)
+        return result if ok else {"available": False, "detail": result, "items": []}
+
+    def history_deals(self, date_from: str, date_to: str) -> dict[str, Any]:
+        ok, result = self._rpc("history_deals", date_from, date_to)
+        return result if ok else {"available": False, "detail": result, "items": []}
+
     def submit_order(self, order: dict[str, Any]) -> dict[str, Any]:
         ok, result = self._rpc("submit_order", order)
         return result if ok else {"ok": False, "unknown": True, "no_retry": True,
@@ -342,7 +351,7 @@ class ProcessMT5Connector:
                 return result
             if name in {"available_symbols", "market_watch_symbols"}:
                 return []
-            if name in {"positions", "orders"}:
+            if name in {"positions", "orders", "history_orders", "history_deals"}:
                 return {"available": False, "detail": result, "items": []}
             if name == "validate_market_symbols":
                 return {"available": False, "valid": False, "invalid": [], "detail": result}
