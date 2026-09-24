@@ -297,6 +297,36 @@ class ConnectorAuditTests(unittest.TestCase):
         self.assertTrue(reconciled["evidence"]["closure_confirmed"])
         self.assertEqual(reconciled["evidence"]["follow_up_close_correlation_id"], close_id)
 
+    def test_smoke_result_and_absent_position_confirm_close_without_history_deals(self):
+        correlation_id = "cccccccccccccccccccccccccccccccc"
+        connector = HistoryConnector(self.database, matching_history=False)
+        self.database.create_trade_audit(
+            correlation_id=correlation_id,
+            terminal_id=connector.terminal_id,
+            method="place_demo_smoke_order",
+            started_at="2026-09-24T12:00:00+00:00",
+            request={"broker_marker": f"SC{correlation_id[:10]}"},
+        )
+        self.database.update_trade_audit(
+            correlation_id,
+            status="acknowledged",
+            result={
+                "ok": True,
+                "filled_volume": 0.01,
+                "filled_price": 1.1,
+                "position_remains": False,
+                "close": {"ok": True, "filled_volume": 0.01, "filled_price": 1.101},
+            },
+        )
+
+        reconciled = AuditedTradingPort(connector, self.database).reconcile(correlation_id)
+
+        self.assertEqual(reconciled["status"], "reconciled")
+        self.assertTrue(reconciled["evidence"]["closure_confirmed"])
+        self.assertEqual(reconciled["evidence"]["filled_volume"], 0.01)
+        self.assertEqual(reconciled["evidence"]["closed_volume"], 0.01)
+        self.assertEqual(reconciled["evidence"]["weighted_close_price"], 1.101)
+
 
 if __name__ == "__main__":
     unittest.main()

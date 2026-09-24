@@ -412,6 +412,7 @@ class AuditedTradingPort:
         close_action = "close" in record["method"] or "emergency_stop" in record["method"]
         action_deals = exit_deals if close_action else entry_deals
         smoke_action = record["method"] == "place_demo_smoke_order"
+        smoke_close_result = result.get("close") if isinstance(result.get("close"), dict) else {}
         follow_up_close = None
         if smoke_action and not correlated_positions:
             position_tickets = set(ids["ticket"])
@@ -435,12 +436,30 @@ class AuditedTradingPort:
                 ):
                     follow_up_close = candidate
                     break
-        closure_confirmed = bool(
-            close_action
-            and result.get("ok")
-            and positions.get("available")
-            and not correlated_positions
-        ) or bool(smoke_action and follow_up_close)
+        closure_confirmed = (
+            bool(
+                close_action
+                and result.get("ok")
+                and positions.get("available")
+                and not correlated_positions
+            )
+            or bool(
+                smoke_action
+                and smoke_close_result.get("ok")
+                and positions.get("available")
+                and not correlated_positions
+            )
+            or bool(smoke_action and follow_up_close)
+        )
+        filled_volume = sum(float(item.get("volume", 0) or 0) for item in action_deals)
+        if not action_deals and result.get("filled_volume") is not None:
+            filled_volume = float(result.get("filled_volume") or 0)
+        closed_volume = sum(float(item.get("volume", 0) or 0) for item in exit_deals)
+        if not exit_deals and smoke_close_result.get("filled_volume") is not None:
+            closed_volume = float(smoke_close_result.get("filled_volume") or 0)
+        weighted_close_price = self._weighted_price(exit_deals)
+        if weighted_close_price is None and smoke_close_result.get("filled_price") is not None:
+            weighted_close_price = float(smoke_close_result.get("filled_price") or 0)
         evidence = {
             "checked_at": date_to,
             "history_orders_available": bool(orders.get("available")),
@@ -456,10 +475,10 @@ class AuditedTradingPort:
             ),
             "requested_symbol": request.get("canonical_symbol") or request.get("symbol"),
             "broker_symbol": request.get("broker_symbol") or observed_broker_symbol,
-            "filled_volume": sum(float(item.get("volume", 0) or 0) for item in action_deals),
+            "filled_volume": filled_volume,
             "weighted_fill_price": self._weighted_price(action_deals),
-            "closed_volume": sum(float(item.get("volume", 0) or 0) for item in exit_deals),
-            "weighted_close_price": self._weighted_price(exit_deals),
+            "closed_volume": closed_volume,
+            "weighted_close_price": weighted_close_price,
             "costs": {
                 "commission": sum(float(item.get("commission", 0) or 0) for item in matched_deals),
                 "swap": sum(float(item.get("swap", 0) or 0) for item in matched_deals),
