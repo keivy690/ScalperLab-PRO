@@ -152,29 +152,24 @@
   }
 
   const statusPt = { draft: "Rascunho", review: "Em revisão", approved: "Aprovada", rejected: "Rejeitada" };
-  function strategyCard(item, { compact = false } = {}) {
+  function strategyCard(item) {
     const detail = item.description || "Sem descrição.";
     const type = item.source_type === "description" ? "DESCRIÇÃO" : item.source_type.toUpperCase();
     const validation = item.validation?.summary || "Aguardando validação";
     const warnings = item.validation?.warnings || [];
     const safeStatus = `<span class="status-chip ${escapeHtml(item.status)}">${escapeHtml(statusPt[item.status] || item.status)}</span>`;
-    const tags = `<div class="tag-row"><span class="tag">${escapeHtml(type)}</span>${!compact && item.file_name ? `<span class="tag">${escapeHtml(item.file_name)}</span>` : ""}</div>`;
+    const tags = `<div class="tag-row"><span class="tag">${escapeHtml(type)}</span>${item.file_name ? `<span class="tag">${escapeHtml(item.file_name)}</span>` : ""}</div>`;
     const actions = `${item.file_name ? `<button class="text-button" data-source-id="${item.id}">Ver arquivo</button>` : ""}${item.status === "draft" ? `<button class="text-button" data-review-id="${item.id}" data-review-status="review">Enviar para revisão</button>` : ""}${item.status === "review" ? `<button class="text-button" data-review-id="${item.id}" data-review-status="approved">Aprovar para estudo demo</button><button class="text-button" data-review-id="${item.id}" data-review-status="rejected">Rejeitar</button>` : ""}`;
     const stamp = Number.isNaN(Date.parse(item.updated_at)) ? "" : new Date(item.updated_at).toLocaleDateString("pt-BR");
-    if (compact) {
-      return `<article class="strategy-card strategy-card-compact"><div class="strategy-card-head"><div><h3>${escapeHtml(item.name)}</h3>${tags}</div>${safeStatus}</div><p class="description">${escapeHtml(detail)}</p><div class="strategy-card-foot"><span>${stamp ? `Atualizada ${escapeHtml(stamp)}` : "No catálogo"}</span></div></article>`;
-    }
     return `<article class="strategy-card"><div class="strategy-card-head"><div><h3>${escapeHtml(item.name)}</h3>${tags}</div>${safeStatus}</div><p class="description">${escapeHtml(detail)}</p><p class="description">${escapeHtml(validation)}${warnings.length ? ` · ${escapeHtml(warnings.join(" "))}` : ""}</p><div class="strategy-card-foot"><span>Atualizada ${escapeHtml(stamp)}</span><div class="strategy-actions">${actions}</div></div></article>`;
   }
 
   function renderStrategies(items) {
     const strategies = items || [];
-    $("#strategy-count").textContent = `${strategies.length} estratégia${strategies.length === 1 ? "" : "s"}`;
     $("#strategy-total-label").textContent = `${strategies.length} registro(s)`;
     $("#strategy-nav-count").textContent = String(strategies.length);
     const visible = state.strategyFilter === "all" ? strategies : strategies.filter((item) => item.status === state.strategyFilter);
     const empty = '<div class="empty-card">Nenhuma estratégia cadastrada. Use “Nova estratégia” para criar uma descrição ou importar um arquivo .mq5/.py.</div>';
-    $("#dashboard-strategies").innerHTML = strategies.length ? strategies.slice(0, 4).map((item) => strategyCard(item, { compact: true })).join("") : empty;
     $("#all-strategies").innerHTML = visible.length ? visible.map(strategyCard).join("") : empty;
   }
 

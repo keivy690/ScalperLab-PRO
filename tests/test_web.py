@@ -69,6 +69,16 @@ class WebTests(unittest.TestCase):
         policy = response.headers["Content-Security-Policy"].encode()
         self.assertIn("default-src 'self'".encode(), policy)
 
+    def test_dashboard_hides_strategy_catalog_but_keeps_its_dedicated_view(self):
+        response = self.client.get("/", headers={"Host": "127.0.0.1:5000"})
+        html = response.get_data(as_text=True)
+        dashboard = html.split('<section class="view active" id="view-dashboard">', 1)[1]
+        dashboard = dashboard.split('<section class="view" id="view-strategies">', 1)[0]
+
+        self.assertNotIn("Estratégias cadastradas", dashboard)
+        self.assertIn('<section class="view" id="view-strategies">', html)
+        self.assertIn("<h1>Estratégias</h1>", html)
+
     def test_home_rejects_unexpected_host(self):
         response = self.client.get("/", headers={"Host": "attacker.example"})
         self.assertEqual(response.status_code, 403)
