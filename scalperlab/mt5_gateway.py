@@ -258,9 +258,10 @@ class MT5Gateway:
     @staticmethod
     def _correlated_comment(comment: str, correlation_id: str | None) -> str:
         if not correlation_id:
-            return comment[:31]
+            return comment[:29]
         marker = f"SC{correlation_id.replace('-', '')[:10]}"
-        return f"{marker} {comment}"[:31]
+        # This MT5 build accepts at most 29 characters in order_check comments.
+        return f"{marker} {comment}"[:29]
 
     def submit_order(self, order: dict[str, Any]) -> dict[str, Any]:
         """Submit only through the existing explicitly armed, risk-checked order paths."""

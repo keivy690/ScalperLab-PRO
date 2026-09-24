@@ -220,6 +220,13 @@ class MT5GatewayTests(unittest.TestCase):
         self.assertTrue(all("SC0123456789" in request["comment"] for request in mt5.requests))
         self.assertEqual(mt5.positions, [])
 
+    def test_correlated_order_comments_fit_mt5_limit(self):
+        comment = MT5Gateway._correlated_comment(
+            "ScalperLab demo close", "02a892ee-68b2-423d-a22d-8927c9de5de8"
+        )
+        self.assertLessEqual(len(comment), 29)
+        self.assertTrue(comment.startswith("SC02a892ee68"))
+
     def test_demo_smoke_order_send_exception_is_unknown_and_never_retried(self):
         mt5 = FakeMT5()
         mt5.positions = []

@@ -196,6 +196,107 @@ class ConnectorAuditTests(unittest.TestCase):
         self.assertEqual(reconciled["evidence"]["closed_volume"], 0.004)
         self.assertEqual(len(reconciled["evidence"]["positions"]), 1)
 
+    def test_smoke_test_with_open_test_position_stays_partial(self):
+        correlation_id = "abcdef0123456789abcdef0123456789"
+        marker = f"SC{correlation_id[:10]}".upper()
+        connector = HistoryConnector(self.database, matching_history=True)
+        connector.orders = [{"ticket": 801, "comment": marker, "symbol": "EURUSD.a"}]
+        connector.deals = [
+            {
+                "ticket": 802,
+                "order": 801,
+                "comment": marker,
+                "symbol": "EURUSD.a",
+                "entry": 0,
+                "volume": 0.01,
+                "price": 1.1,
+            }
+        ]
+        connector.open_positions = [
+            {
+                "ticket": 801,
+                "comment": marker,
+                "symbol": "EURUSD.a",
+                "volume": 0.01,
+                "magic": 209221001,
+            }
+        ]
+        self.database.create_trade_audit(
+            correlation_id=correlation_id,
+            terminal_id=connector.terminal_id,
+            method="place_demo_smoke_order",
+            started_at="2026-09-24T12:00:00+00:00",
+            request={"broker_marker": marker, "canonical_symbol": "EURUSD"},
+        )
+        self.database.update_trade_audit(
+            correlation_id,
+            status="partial",
+            result={"ok": False, "partial": True, "position_remains": True},
+        )
+        audited = AuditedTradingPort(connector, self.database)
+
+        reconciled = audited.reconcile(correlation_id)
+
+        self.assertEqual(reconciled["status"], "partial")
+
+    def test_successful_close_and_absent_position_reconcile_without_history_ticket(self):
+        correlation_id = "1234567890abcdef1234567890abcdef"
+        connector = HistoryConnector(self.database, matching_history=False)
+        self.database.create_trade_audit(
+            correlation_id=correlation_id,
+            terminal_id=connector.terminal_id,
+            method="close_demo_position",
+            started_at="2026-09-24T12:00:00+00:00",
+            request={"ticket": 801},
+        )
+        self.database.update_trade_audit(
+            correlation_id,
+            status="acknowledged",
+            result={"ok": True, "retcode": 10009, "correlation_id": correlation_id},
+        )
+
+        reconciled = AuditedTradingPort(connector, self.database).reconcile(correlation_id)
+
+        self.assertEqual(reconciled["status"], "reconciled")
+        self.assertFalse(reconciled["evidence"]["match_found"])
+        self.assertTrue(reconciled["evidence"]["closure_confirmed"])
+
+    def test_smoke_test_links_a_later_audited_close_for_its_position(self):
+        smoke_id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        close_id = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        connector = HistoryConnector(self.database, matching_history=False)
+        self.database.create_trade_audit(
+            correlation_id=smoke_id,
+            terminal_id=connector.terminal_id,
+            method="place_demo_smoke_order",
+            started_at="2026-09-24T12:00:00+00:00",
+            request={"broker_marker": f"SC{smoke_id[:10]}"},
+        )
+        self.database.update_trade_audit(
+            smoke_id,
+            status="partial",
+            result={"ok": False, "open_order": 801, "position_remains": True},
+        )
+        self.database.create_trade_audit(
+            correlation_id=close_id,
+            terminal_id=connector.terminal_id,
+            method="close_demo_position",
+            started_at="2026-09-24T12:01:00+00:00",
+            request={"ticket": 801},
+        )
+        self.database.update_trade_audit(
+            close_id,
+            status="reconciled",
+            result={"ok": True},
+            evidence={"closure_confirmed": True},
+        )
+
+        reconciled = AuditedTradingPort(connector, self.database).reconcile(smoke_id)
+
+        self.assertEqual(reconciled["status"], "reconciled")
+        self.assertTrue(reconciled["evidence"]["closure_confirmed"])
+        self.assertEqual(reconciled["evidence"]["follow_up_close_correlation_id"], close_id)
+
 
 if __name__ == "__main__":
     unittest.main()

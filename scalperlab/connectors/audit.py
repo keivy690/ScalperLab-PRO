@@ -411,6 +411,36 @@ class AuditedTradingPort:
         ]
         close_action = "close" in record["method"] or "emergency_stop" in record["method"]
         action_deals = exit_deals if close_action else entry_deals
+        smoke_action = record["method"] == "place_demo_smoke_order"
+        follow_up_close = None
+        if smoke_action and not correlated_positions:
+            position_tickets = set(ids["ticket"])
+            for key in ("ticket", "position_ticket", "open_order"):
+                try:
+                    value = int(result.get(key, 0) or 0)
+                    if value > 0:
+                        position_tickets.add(value)
+                except (TypeError, ValueError):
+                    pass
+            for candidate in self.database.list_trade_audit(limit=500):
+                candidate_ticket = candidate["request"].get("ticket")
+                if (
+                    candidate["terminal_id"] == self.terminal_id
+                    and candidate["method"] == "close_demo_position"
+                    and candidate_ticket is not None
+                    and int(candidate_ticket) in position_tickets
+                    and candidate["started_at"] >= record["started_at"]
+                    and candidate["result"].get("ok")
+                    and candidate["evidence"].get("closure_confirmed")
+                ):
+                    follow_up_close = candidate
+                    break
+        closure_confirmed = bool(
+            close_action
+            and result.get("ok")
+            and positions.get("available")
+            and not correlated_positions
+        ) or bool(smoke_action and follow_up_close)
         evidence = {
             "checked_at": date_to,
             "history_orders_available": bool(orders.get("available")),
@@ -420,6 +450,10 @@ class AuditedTradingPort:
             "orders": matched_orders,
             "deals": matched_deals,
             "positions": correlated_positions,
+            "closure_confirmed": closure_confirmed,
+            "follow_up_close_correlation_id": (
+                follow_up_close["correlation_id"] if follow_up_close else None
+            ),
             "requested_symbol": request.get("canonical_symbol") or request.get("symbol"),
             "broker_symbol": request.get("broker_symbol") or observed_broker_symbol,
             "filled_volume": sum(float(item.get("volume", 0) or 0) for item in action_deals),
@@ -434,16 +468,20 @@ class AuditedTradingPort:
             },
             "detail": "Histórico e posição correlacionados."
             if available and found
+            else "Fechamento aceito e posição confirmada como ausente."
+            if closure_confirmed
             else "Aguardando correspondência no histórico; nenhuma ordem foi reenviada."
             if available
             else "Histórico/posições indisponíveis; reconciliação permanece pendente.",
         }
-        still_open_close = close_action and bool(correlated_positions)
+        still_open_close = (close_action or smoke_action) and bool(correlated_positions)
         status = (
             "partial"
             if available and found and still_open_close
             else "reconciled"
-            if available and found
+            if (available and found) or closure_confirmed
+            else "pending_reconciliation"
+            if smoke_action and result.get("position_remains") is True
             else record["status"]
         )
         if status == "prepared":
