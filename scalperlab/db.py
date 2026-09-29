@@ -110,8 +110,116 @@ class Database:
                 );
                 CREATE INDEX IF NOT EXISTS idx_replay_runs_created
                     ON replay_runs(created_at DESC);
+                CREATE TABLE IF NOT EXISTS sr_evaluations (
+                    account_sha256 TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    rule_version TEXT NOT NULL,
+                    trigger_bar_utc INTEGER NOT NULL,
+                    created_at TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    result_json TEXT NOT NULL,
+                    PRIMARY KEY(account_sha256, symbol, rule_version, trigger_bar_utc)
+                );
+                CREATE INDEX IF NOT EXISTS idx_sr_evaluations_created
+                    ON sr_evaluations(created_at DESC);
+                CREATE TABLE IF NOT EXISTS sr_replay_runs (
+                    run_id TEXT PRIMARY KEY,
+                    created_at TEXT NOT NULL,
+                    terminal_id TEXT NOT NULL,
+                    account_sha256 TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    data_sha256 TEXT NOT NULL,
+                    parameters_json TEXT NOT NULL,
+                    result_json TEXT NOT NULL,
+                    dataset_zlib BLOB NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_sr_replay_runs_created
+                    ON sr_replay_runs(created_at DESC);
                 """
             )
+
+    def save_sr_evaluation(self, *, account_sha256: str, result: dict[str, Any]) -> None:
+        """Persist one research decision per closed M5 bar; never stores a login."""
+        symbol = str(result["symbol"])
+        trigger = int(result["frame_last_closed"]["M5"])
+        version = str(result["version"])
+        if len(account_sha256) != 64 or trigger <= 0 or not symbol or not version:
+            raise ValueError("Identidade ou resultado de pesquisa inválido.")
+        payload = json.dumps(result, ensure_ascii=False, sort_keys=True, default=str)
+        with self.connect() as connection:
+            connection.execute(
+                """INSERT INTO sr_evaluations
+                (account_sha256, symbol, rule_version, trigger_bar_utc,
+                 created_at, status, result_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(account_sha256, symbol, rule_version, trigger_bar_utc)
+                DO NOTHING""",
+                (account_sha256, symbol, version, trigger, now_iso(),
+                 str(result.get("status") or "UNKNOWN"), payload),
+            )
+            connection.execute(
+                """DELETE FROM sr_evaluations WHERE rowid NOT IN
+                (SELECT rowid FROM sr_evaluations ORDER BY created_at DESC LIMIT 20000)"""
+            )
+
+    def list_sr_evaluations(self, limit: int = 100) -> list[dict[str, Any]]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                """SELECT created_at, symbol, rule_version, trigger_bar_utc,
+                status, result_json FROM sr_evaluations
+                ORDER BY created_at DESC, trigger_bar_utc DESC LIMIT ?""",
+                (max(1, min(int(limit), 500)),),
+            ).fetchall()
+        return [{**dict(row), "result": json.loads(row["result_json"])}
+                for row in rows]
+
+    def save_sr_replay_run(self, *, run_id: str, terminal_id: str,
+                           account_sha256: str, symbol: str, result: dict[str, Any],
+                           dataset: dict[str, Any]) -> None:
+        packed = zlib.compress(json.dumps(dataset, ensure_ascii=False,
+                                           sort_keys=True, separators=(",", ":"),
+                                           default=str).encode(), level=9)
+        with self.connect() as connection:
+            connection.execute(
+                """INSERT INTO sr_replay_runs
+                (run_id, created_at, terminal_id, account_sha256, symbol,
+                 data_sha256, parameters_json, result_json, dataset_zlib)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (run_id, now_iso(), terminal_id, account_sha256, symbol,
+                 result["data_sha256"],
+                 json.dumps(result["parameters"], ensure_ascii=False, default=str),
+                 json.dumps(result, ensure_ascii=False, default=str), packed),
+            )
+            connection.execute(
+                """DELETE FROM sr_replay_runs WHERE run_id NOT IN
+                (SELECT run_id FROM sr_replay_runs ORDER BY created_at DESC LIMIT 30)"""
+            )
+
+    def list_sr_replay_runs(self, limit: int = 20) -> list[dict[str, Any]]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                """SELECT run_id, created_at, terminal_id, symbol, data_sha256
+                FROM sr_replay_runs ORDER BY created_at DESC LIMIT ?""",
+                (max(1, min(int(limit), 30)),),
+            ).fetchall()
+        return [{key: row[key] for key in ("run_id", "created_at", "terminal_id",
+                                         "symbol", "data_sha256")} for row in rows]
+
+    def get_sr_replay_run(self, run_id: str) -> dict[str, Any] | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                """SELECT run_id, created_at, terminal_id, symbol, data_sha256,
+                parameters_json, result_json, dataset_zlib FROM sr_replay_runs
+                WHERE run_id = ?""", (run_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {"run_id": row["run_id"], "created_at": row["created_at"],
+                "terminal_id": row["terminal_id"], "symbol": row["symbol"],
+                "data_sha256": row["data_sha256"],
+                "parameters": json.loads(row["parameters_json"]),
+                "result": json.loads(row["result_json"]),
+                "dataset": json.loads(zlib.decompress(row["dataset_zlib"]))}
 
     def save_replay_run(self, *, run_id: str, terminal_id: str,
                         account_fingerprint_sha256: str, symbol: str,

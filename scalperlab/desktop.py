@@ -16,6 +16,7 @@ def run_desktop() -> None:
     app = None
     engine = None
     analyst = None
+    sr_research = None
     clock_monitor = None
     server = None
     thread = None
@@ -28,6 +29,7 @@ def run_desktop() -> None:
         app = create_app()
         engine = app.extensions["scalper_engine"]
         analyst = app.extensions["scalper_analyst"]
+        sr_research = app.extensions["scalper_sr_research"]
         clock_monitor = app.extensions["scalper_clock_monitor"]
         engine.start_service()
         analyst.start_service()
@@ -50,6 +52,8 @@ def run_desktop() -> None:
                 engine.shutdown()
             if analyst is not None:
                 analyst.shutdown()
+            if sr_research is not None:
+                sr_research.stop()
             if app is not None:
                 app.extensions["scalper_connector_manager"].shutdown()
             if server is not None:

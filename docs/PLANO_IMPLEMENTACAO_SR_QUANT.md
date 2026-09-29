@@ -5,6 +5,8 @@
 **Base funcional:** [ESPECIFICACAO_MOTOR_SR_QUANT.md](ESPECIFICACAO_MOTOR_SR_QUANT.md)
 **Resultado pretendido:** três famílias de sinais causais — continuação em tendência, rompimento com reteste e falso rompimento em lateralização — avaliadas com os dados do MT5, primeiro em pesquisa/observação e depois, se aprovadas, por execução DEMO no caminho de risco já existente.
 
+**Andamento em 29/09/2026:** Etapas 0–4 implementadas em código, com backup local e replay sintético reproduzível. O replay ainda não foi executado com histórico real do broker nesta etapa; logo, o aceite empírico das Etapas 1, 3 e 4 depende dessa verificação. Etapas 5–7 permanecem pendentes de evidência e promoção explícita. Detalhes em [IMPLEMENTACAO_SR_QUANT_2026-09-29.md](IMPLEMENTACAO_SR_QUANT_2026-09-29.md).
+
 ## 1. Constatações no código atual
 
 - `MarketAnalystEngine` em `scalperlab/market_analyst.py` possui uma regra de pullback SMA 21 e lê 300 candles de **um** timeframe por símbolo a cada ciclo. `analyze_market` e `_maybe_execute` ficam no mesmo módulo.

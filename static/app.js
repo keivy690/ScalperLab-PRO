@@ -394,11 +394,12 @@
     const selectedSupported = supportedNames.includes(selected?.name);
     const clockReady = state.snapshot?.system_clock?.status === "synchronized"
       && state.snapshot?.system_clock?.mt5_status === "verified";
-    $("#engine-demo").disabled = Boolean(runtime.running || !clockReady || mt5?.account?.mode !== "DEMO" || selected?.status !== "approved" || !selectedSupported);
-    $("#engine-real").disabled = Boolean(runtime.running || !clockReady || mt5?.account?.mode !== "REAL" || selected?.status !== "approved" || !selectedSupported);
+    const srBusy = Boolean(state.snapshot?.sr_research?.busy);
+    $("#engine-demo").disabled = Boolean(runtime.running || srBusy || !clockReady || mt5?.account?.mode !== "DEMO" || selected?.status !== "approved" || !selectedSupported);
+    $("#engine-real").disabled = Boolean(runtime.running || srBusy || !clockReady || mt5?.account?.mode !== "REAL" || selected?.status !== "approved" || !selectedSupported);
     $("#engine-demo").title = clockReady ? "Iniciar execução DEMO" : "Verifique o horário UTC no botão lateral antes de executar";
     $("#engine-real").title = clockReady ? "Iniciar execução REAL" : "Verifique o horário UTC no botão lateral antes de executar";
-    $("#engine-observe").disabled = Boolean(runtime.running || !mt5?.connected || selected?.status !== "approved" || !selectedSupported);
+    $("#engine-observe").disabled = Boolean(runtime.running || srBusy || !mt5?.connected || selected?.status !== "approved" || !selectedSupported);
     $("#engine-stop").disabled = !runtime.running;
   }
 
@@ -427,9 +428,10 @@
     const executionActive = runtime.running && ["demo", "real"].includes(runtime.mode);
     const clockReady = state.snapshot?.system_clock?.status === "synchronized"
       && state.snapshot?.system_clock?.mt5_status === "verified";
-    $("#analyst-observe").disabled = Boolean(runtime.running || !symbols.length || !connected);
-    $("#analyst-demo").disabled = Boolean(executionActive || !tradableSelection || !connected);
-    $("#analyst-real").disabled = Boolean(executionActive || !tradableSelection || !connected);
+    const srBusy = Boolean(state.snapshot?.sr_research?.busy);
+    $("#analyst-observe").disabled = Boolean(runtime.running || srBusy || !symbols.length || !connected);
+    $("#analyst-demo").disabled = Boolean(executionActive || srBusy || !tradableSelection || !connected);
+    $("#analyst-real").disabled = Boolean(executionActive || srBusy || !tradableSelection || !connected);
     const tradeNote = tradableSelection ? "" : "Selecione apenas ativos disponíveis e negociáveis para habilitar envio";
     const clockNote = clockReady ? "" : "O horário UTC será conferido automaticamente antes da execução";
     const accountMode = state.snapshot?.mt5?.account?.mode || "não identificada";
@@ -530,6 +532,108 @@
     if (active) $("#replay-status").textContent = "Pare o Analista e o motor de estratégias antes do replay; o conector é compartilhado.";
   }
 
+  function renderSrSymbolOptions() {
+    const items = state.marketWatch?.available ? (state.marketWatch.items || []).filter((item) => item.broker_symbol) : [];
+    const first = $("#sr-symbol-1"), second = $("#sr-symbol-2");
+    if (!first || !second) return;
+    const previousFirst = first.value || state.snapshot?.sr_research?.symbols?.[0] || "";
+    const previousSecond = second.value || state.snapshot?.sr_research?.symbols?.[1] || "";
+    const options = items.map((item) => `<option value="${escapeHtml(item.broker_symbol)}" ${item.trade_enabled ? "" : "disabled"}>${escapeHtml(item.broker_symbol)}${item.trade_enabled ? "" : " · somente leitura"}</option>`).join("");
+    first.innerHTML = '<option value="">Selecione um ativo</option>' + options;
+    second.innerHTML = '<option value="">Nenhum</option>' + options;
+    first.value = items.some((item) => item.broker_symbol === previousFirst && item.trade_enabled) ? previousFirst : "";
+    second.value = items.some((item) => item.broker_symbol === previousSecond && item.trade_enabled) ? previousSecond : "";
+    first.disabled = second.disabled = !state.marketWatch?.available;
+    const replay = $("#sr-replay-symbol");
+    const replayPrevious = replay.value;
+    replay.innerHTML = '<option value="">Selecione um ativo</option>' + options;
+    replay.value = items.some((item) => item.broker_symbol === replayPrevious && item.trade_enabled) ? replayPrevious : "";
+    replay.disabled = !state.marketWatch?.available;
+    renderSrResearch(state.snapshot?.sr_research || {});
+  }
+
+  function renderSrResearch(research = {}) {
+    const running = Boolean(research.running);
+    const busy = Boolean(research.busy);
+    const conflict = Boolean(state.snapshot?.analyst?.state?.running || state.snapshot?.engine?.state?.running);
+    const badge = $("#sr-status");
+    if (!badge) return;
+    badge.textContent = running ? "PESQUISANDO · SEM ORDENS" : busy ? "FINALIZANDO" : "PARADA";
+    badge.className = `status-chip ${running ? "active" : ""}`;
+    $("#sr-start").disabled = busy || conflict || !$("#sr-symbol-1").value;
+    $("#sr-stop").disabled = !running;
+    $("#sr-symbol-1").disabled = $("#sr-symbol-2").disabled = busy || !state.marketWatch?.available;
+    $("#sr-replay-run").disabled = busy || conflict || !$("#sr-replay-symbol").value;
+    $("#sr-replay-saved").disabled = busy || conflict;
+    $("#sr-detail").textContent = `${research.detail || "Pesquisa desligada."}${research.last_cycle_at ? ` · ${new Date(research.last_cycle_at).toLocaleTimeString("pt-BR", {hour12:false})}` : ""}${conflict && !running ? " · Pare os motores de ordens para iniciar esta pesquisa." : ""}`;
+    const results = research.last_results || [];
+    $("#sr-results").innerHTML = results.length ? results.map((item) => {
+      const direction = item.regime?.direction || "indisponível";
+      const candidates = (item.candidates || []).map((candidate) => `${candidate.strategy} ${candidate.side} (${candidate.status})`).join(" · ") || "Nenhum candidato";
+      const reasons = (item.rejections || []).map((reason) => reason.code).join(" · ") || item.detail || "Sem bloqueios registrados";
+      const filters = Object.entries(item.filter_counts || {}).map(([name, count]) => `${name}: ${count}`).join(" · ");
+      return `<article class="sr-result"><div class="sr-result-head"><strong>${escapeHtml(item.symbol || "Ativo")}</strong><span>${escapeHtml(item.status || "—")}</span></div><div class="sr-result-grid"><span>Regime <b>${escapeHtml(direction)}</b></span><span>Zonas <b>${number(item.zones_found || 0, 0)}</b></span><span>Spread/ATR M5 <b>${item.spread_to_atr_m5 == null ? "—" : number(item.spread_to_atr_m5, 3)}</b></span><span>Último M5 <b>${item.frame_last_closed?.M5 ? escapeHtml(new Date(item.frame_last_closed.M5 * 1000).toLocaleString("pt-BR")) : "—"}</b></span></div><p><b>Hipóteses:</b> ${escapeHtml(candidates)}</p><p><b>Motivos:</b> ${escapeHtml(reasons)}</p><small>${escapeHtml(filters)}</small></article>`;
+    }).join("") : '<div class="empty-card">Nenhuma avaliação desta sessão.</div>';
+  }
+
+  async function startSrResearch() {
+    const symbols = [$("#sr-symbol-1").value, $("#sr-symbol-2").value].filter(Boolean);
+    if (!symbols.length || new Set(symbols).size !== symbols.length) {
+      toast("Selecione um ou dois ativos diferentes do Market Watch.", "error"); return;
+    }
+    try {
+      const result = await api("/api/sr-quant/start", {method:"POST", body:JSON.stringify({symbols}), timeoutMs:15000});
+      toast(result.detail, "success"); await refresh();
+    } catch (error) { toast(error.message, "error"); }
+  }
+
+  async function stopSrResearch() {
+    try {
+      const result = await api("/api/sr-quant/stop", {method:"POST", body:"{}", timeoutMs:15000});
+      toast(result.detail, "success"); await refresh();
+    } catch (error) { toast(error.message, "error"); }
+  }
+
+  function renderSrReplayReport(result) {
+    const host = $("#sr-replay-report");
+    const familyNames = {trend_pullback:"Pullback em tendência", breakout_retest:"Rompimento e reteste",
+      range_fakeout:"Falso rompimento lateral", momentum20_baseline:"Baseline momentum 20"};
+    const segments = result.segments || {};
+    const renderSegment = (title, segment = {}) => `<section class="sr-replay-segment"><h3>${title}</h3><small>${escapeHtml(segment.first_bar_utc || "")} → ${escapeHtml(segment.last_bar_utc || "")} · ${number(segment.evaluated_bars || 0, 0)} candles avaliados</small><div class="table-wrap"><table><thead><tr><th>Família</th><th>Sinais</th><th>Trades</th><th>R líquido</th><th>Drawdown</th><th>Amostra</th></tr></thead><tbody>${Object.entries(segment.families || {}).map(([name, metrics]) => `<tr><td>${escapeHtml(familyNames[name] || name)}</td><td>${number(metrics.signals || 0, 0)}</td><td>${number(metrics.closed_trades || 0, 0)}</td><td>${metrics.net_r == null ? "—" : `${number(metrics.net_r, 2)} R`}</td><td>${metrics.max_drawdown_r == null ? "—" : `${number(metrics.max_drawdown_r, 2)} R`}</td><td>${escapeHtml(metrics.sample_status || "—")}</td></tr>`).join("")}</tbody></table></div><small>Filtros: ${escapeHtml(Object.entries(segment.filters || {}).map(([key, value]) => `${key}: ${value}`).join(" · ") || "nenhum")}</small></section>`;
+    host.innerHTML = `<div class="sr-replay-heading"><strong>${escapeHtml(result.symbol || "")} · versão ${escapeHtml(result.version || "")}</strong><span>TRIAGEM OHLC · SEM ORDENS</span></div>${renderSegment("Desenvolvimento · 70% inicial", segments.development)}${renderSegment("Holdout · 30% final", segments.holdout)}<div class="replay-hash"><span>SHA-256 do histórico, contrato e custos</span><code>${escapeHtml(result.data_sha256 || "")}</code></div><div class="replay-limitations"><strong>Limitações</strong><ul>${(result.limitations || []).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></div>`;
+    host.classList.remove("hidden");
+  }
+
+  async function runSrReplay(event) {
+    event.preventDefault();
+    const form = $("#sr-replay-form");
+    if (!form.reportValidity()) return;
+    const data = Object.fromEntries(new FormData(form));
+    data.costs_confirmed = form.elements.costs_confirmed.checked;
+    const button = $("#sr-replay-run");
+    button.disabled = true;
+    $("#sr-replay-report").classList.add("hidden");
+    $("#sr-replay-status").textContent = `Consultando H1, M15 e M5 de ${data.symbol} e simulando custos; nenhuma ordem será enviada.`;
+    try {
+      const response = await api("/api/sr-quant/replay", {method:"POST", body:JSON.stringify(data), timeoutMs:120000});
+      $("#sr-replay-status").textContent = response.detail;
+      renderSrReplayReport(response.result);
+    } catch (error) { $("#sr-replay-status").textContent = error.message; toast(error.message, "error"); }
+    finally { renderSrResearch(state.snapshot?.sr_research || {}); }
+  }
+
+  async function replaySavedSr() {
+    const button = $("#sr-replay-saved");
+    button.disabled = true;
+    $("#sr-replay-status").textContent = "Reproduzindo o último histórico S/R salvo, sem consultar o MT5.";
+    try {
+      const response = await api("/api/sr-quant/replay-saved", {method:"POST", body:"{}", timeoutMs:120000});
+      $("#sr-replay-status").textContent = response.detail;
+      renderSrReplayReport(response.result);
+    } catch (error) { $("#sr-replay-status").textContent = error.message; toast(error.message, "error"); }
+    finally { renderSrResearch(state.snapshot?.sr_research || {}); }
+  }
+
   async function refreshMarketWatch(showToast = true) {
     if (state.marketWatchLoading) return;
     state.marketWatchLoading = true;
@@ -543,10 +647,12 @@
         state.selectedAnalystSymbols = [...(state.snapshot?.analyst?.config?.symbols || [])];
       }
       renderMarketWatchPicker();
+      renderSrSymbolOptions();
       if (showToast) toast(`${catalog.count} ativo(s) carregado(s) do MT5.`, "success");
     } catch (error) {
       state.marketWatch = { available: false, source: "MT5 Market Watch", count: 0, items: [], detail: error.message };
       renderMarketWatchPicker();
+      renderSrSymbolOptions();
       if (showToast) toast(error.message, "error");
     } finally {
       state.marketWatchLoading = false;
@@ -790,6 +896,7 @@
     renderStrategies(snapshot.strategies);
     renderEngine(snapshot.engine, snapshot.strategies, mt5);
     renderAnalyst(snapshot.analyst);
+    renderSrResearch(snapshot.sr_research);
     renderRiskSettings(snapshot);
     renderDashboardStatus(snapshot);
     renderDashboardAnalyst(snapshot.analyst);
@@ -1364,6 +1471,12 @@
   $("#analyst-demo").addEventListener("click", () => startAnalyst("demo"));
   $("#analyst-real").addEventListener("click", () => startAnalyst("real"));
   $("#analyst-stop").addEventListener("click", stopAnalyst);
+  $("#sr-start").addEventListener("click", startSrResearch);
+  $("#sr-stop").addEventListener("click", stopSrResearch);
+  $("#sr-symbol-1").addEventListener("change", () => renderSrResearch(state.snapshot?.sr_research || {}));
+  $("#sr-replay-symbol").addEventListener("change", () => renderSrResearch(state.snapshot?.sr_research || {}));
+  $("#sr-replay-form").addEventListener("submit", runSrReplay);
+  $("#sr-replay-saved").addEventListener("click", replaySavedSr);
   $("#engine-strategy").addEventListener("change", () => renderEngine(state.snapshot?.engine, state.snapshot?.strategies, state.snapshot?.mt5));
   $("#engine-observe").addEventListener("click", () => startEngine("observacao"));
   $("#engine-demo").addEventListener("click", () => startEngine("demo"));

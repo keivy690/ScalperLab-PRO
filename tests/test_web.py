@@ -82,6 +82,52 @@ class WebTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json["items"], [])
 
+    def test_sr_research_routes_require_token_and_start_only_when_motors_stopped(self):
+        page = self.client.get("/", headers=self.headers)
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(b'id="sr-symbol-1"', page.data)
+        self.assertIn(b'id="sr-replay-form"', page.data)
+        self.assertEqual(self.client.get("/api/sr-quant/evaluations").status_code, 403)
+        response = self.client.get("/api/sr-quant/evaluations", headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["items"], [])
+        analyst = self.app.extensions["scalper_analyst"]
+        service = self.app.extensions["scalper_sr_research"]
+        with patch.object(analyst, "snapshot", return_value={"state": {"running": True}}), \
+             patch.object(service, "start") as start:
+            blocked = self.client.post("/api/sr-quant/start", headers=self.headers,
+                                       json={"symbols": ["EURUSD#"]})
+        self.assertEqual(blocked.status_code, 409)
+        start.assert_not_called()
+
+    def test_sr_replay_does_not_consult_mt5_when_research_active(self):
+        service = self.app.extensions["scalper_sr_research"]
+        port = self.app.extensions["scalper_mt5"]
+        with patch.object(service, "snapshot", return_value={"running": True, "busy": True}), \
+             patch.object(port, "historical_market_data") as history:
+            response = self.client.post("/api/sr-quant/replay", headers=self.headers,
+                                        json={"symbol": "EURUSD#", "bars": 600,
+                                              "costs_confirmed": True})
+        self.assertEqual(response.status_code, 409)
+        history.assert_not_called()
+
+    def test_sr_saved_replay_rejects_hash_mismatch(self):
+        database = self.app.extensions["scalper_db"]
+        saved = {"run_id": "run-1", "symbol": "EURUSD#", "data_sha256": "expected",
+                 "parameters": {"slippage_points_per_side": 1,
+                                "commission_per_lot_round_turn": 0,
+                                "swap_long_per_lot_per_utc_rollover": 0,
+                                "swap_short_per_lot_per_utc_rollover": 0,
+                                "costs_confirmed": True},
+                 "dataset": {"frames": {}, "contract": {}}}
+        with patch.object(database, "list_sr_replay_runs", return_value=[{"run_id": "run-1"}]), \
+             patch.object(database, "get_sr_replay_run", return_value=saved), \
+             patch("scalperlab.web.run_sr_replay", return_value={"data_sha256": "different"}):
+            response = self.client.post("/api/sr-quant/replay-saved", headers=self.headers,
+                                        json={})
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("Hash", response.json["error"])
+
     def test_replay_does_not_compete_with_an_active_execution_engine(self):
         analyst = self.app.extensions["scalper_analyst"]
         with patch.object(analyst, "snapshot", return_value={"state": {"running": True}}):

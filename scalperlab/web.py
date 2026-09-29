@@ -25,6 +25,8 @@ from .replay import (MAX_REPLAY_BARS, MIN_VALIDATION_BARS,
                      ReplayValidationError, run_pullback_validation)
 from .strategy_validation import validate_strategy
 from .system_clock import SystemClockService
+from .sr_quant.service import SrResearchService
+from .sr_quant.replay import MIN_M5_BARS, MAX_M5_BARS, run_sr_replay
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 VALID_STRATEGY_STATES = {"review", "approved", "rejected"}
@@ -130,6 +132,8 @@ def create_app(*, database: Database | None = None, mt5: MT5Gateway | None = Non
     app.extensions["scalper_analyst"] = MarketAnalystEngine(
         app.extensions["scalper_db"], app.extensions["scalper_mt5"],
         clock_service=app.extensions["scalper_system_clock"], risk_settings=risk_settings)
+    app.extensions["scalper_sr_research"] = SrResearchService(
+        app.extensions["scalper_db"], app.extensions["scalper_mt5"])
 
     @app.before_request
     def protect_local_api():
@@ -151,7 +155,8 @@ def create_app(*, database: Database | None = None, mt5: MT5Gateway | None = Non
     def serialize_risk_actions():
         if request.method == "POST" and request.path in {
             "/api/settings/risk", "/api/engine/start", "/api/analyst/start",
-            "/api/engine/profile", "/api/analyst/profile"}:
+            "/api/engine/profile", "/api/analyst/profile", "/api/sr-quant/start",
+            "/api/sr-quant/replay", "/api/sr-quant/replay-saved"}:
             risk_actions_lock.acquire()
             g.risk_action_locked = True
 
@@ -209,6 +214,7 @@ def create_app(*, database: Database | None = None, mt5: MT5Gateway | None = Non
                         "providers": app.extensions["scalper_research"].provider_status(),
                         "engine": engine_state,
                         "analyst": app.extensions["scalper_analyst"].snapshot(),
+                        "sr_research": app.extensions["scalper_sr_research"].snapshot(),
                         "system_clock": clock_snapshot,
                         "ai": {"available": app.extensions["scalper_ai"].available,
                                "model": app.extensions["scalper_ai"].model},
@@ -389,6 +395,8 @@ def create_app(*, database: Database | None = None, mt5: MT5Gateway | None = Non
 
     @app.post("/api/analyst/start")
     def analyst_start():
+        if app.extensions["scalper_sr_research"].snapshot()["busy"]:
+            return jsonify(ok=False, detail="Pare a pesquisa S/R antes de iniciar o Analista; o conector MT5 é compartilhado."), 409
         data = _json_body() or {}
         mode = _bounded(data.get("mode"), 20)
         result = app.extensions["scalper_analyst"].start(
@@ -402,6 +410,125 @@ def create_app(*, database: Database | None = None, mt5: MT5Gateway | None = Non
         result = app.extensions["scalper_analyst"].stop()
         app.extensions["scalper_db"].add_log("INFO", f"Analista de mercado: {result['detail']}")
         return jsonify(result)
+
+    @app.post("/api/sr-quant/start")
+    def sr_quant_start():
+        if (app.extensions["scalper_analyst"].snapshot()["state"].get("running")
+                or app.extensions["scalper_engine"].snapshot()["state"].get("running")):
+            return jsonify(ok=False, detail="Pare os motores antes de iniciar a pesquisa S/R; o conector MT5 é compartilhado."), 409
+        data = _json_body() or {}
+        result = app.extensions["scalper_sr_research"].start(data.get("symbols"))
+        app.extensions["scalper_db"].add_log(
+            "INFO" if result["ok"] else "WARN", f"Pesquisa S/R: {result['detail']}")
+        return jsonify(result), (200 if result["ok"] else 409)
+
+    @app.post("/api/sr-quant/stop")
+    def sr_quant_stop():
+        result = app.extensions["scalper_sr_research"].stop()
+        app.extensions["scalper_db"].add_log("INFO", f"Pesquisa S/R: {result['detail']}")
+        return jsonify(result)
+
+    @app.get("/api/sr-quant/evaluations")
+    def sr_quant_evaluations():
+        return jsonify(items=app.extensions["scalper_db"].list_sr_evaluations(100))
+
+    @app.get("/api/sr-quant/replays")
+    def sr_quant_replays():
+        return jsonify(items=app.extensions["scalper_db"].list_sr_replay_runs(20))
+
+    @app.post("/api/sr-quant/replay-saved")
+    def sr_quant_replay_saved():
+        if (app.extensions["scalper_sr_research"].snapshot()["busy"]
+                or app.extensions["scalper_analyst"].snapshot()["state"].get("running")
+                or app.extensions["scalper_engine"].snapshot()["state"].get("running")):
+            return jsonify(error="Pare os motores antes de reproduzir o histórico salvo."), 409
+        saved = app.extensions["scalper_db"].list_sr_replay_runs(1)
+        if not saved:
+            return jsonify(error="Nenhum replay S/R salvo nesta instalação."), 404
+        record = app.extensions["scalper_db"].get_sr_replay_run(saved[0]["run_id"])
+        if record is None:
+            return jsonify(error="Histórico S/R salvo indisponível."), 404
+        parameters = record["parameters"]
+        dataset = record["dataset"]
+        try:
+            result = run_sr_replay(
+                symbol=record["symbol"], frames=dataset["frames"],
+                contract=dataset["contract"],
+                slippage_points=parameters["slippage_points_per_side"],
+                commission_per_lot_round_turn=parameters["commission_per_lot_round_turn"],
+                swap_long_per_lot_per_utc_rollover=parameters["swap_long_per_lot_per_utc_rollover"],
+                swap_short_per_lot_per_utc_rollover=parameters["swap_short_per_lot_per_utc_rollover"],
+                costs_confirmed=parameters["costs_confirmed"])
+        except (ReplayValidationError, KeyError, ValueError, TypeError) as exc:
+            return jsonify(error=f"Histórico salvo incompatível: {exc}"), 409
+        if result["data_sha256"] != record["data_sha256"]:
+            return jsonify(error="Hash do replay salvo divergiu; resultado descartado."), 409
+        return jsonify(result={**result, "run_id": record["run_id"], "offline": True},
+                       detail="Replay S/R reproduzido do histórico local com hash conferido; sem consultar o MT5."), 200
+
+    @app.post("/api/sr-quant/replay")
+    def sr_quant_replay():
+        if (app.extensions["scalper_sr_research"].snapshot()["busy"]
+                or app.extensions["scalper_analyst"].snapshot()["state"].get("running")
+                or app.extensions["scalper_engine"].snapshot()["state"].get("running")):
+            return jsonify(error="Pare os motores e a pesquisa S/R antes do replay; o conector MT5 é compartilhado."), 409
+        data = _json_body() or {}
+        if data.get("costs_confirmed") is not True:
+            return jsonify(error="Confirme os custos informados para o replay."), 400
+        symbol = _bounded(data.get("symbol"), 32)
+        try:
+            count = int(data.get("bars", 0))
+        except (TypeError, ValueError):
+            return jsonify(error="Quantidade de candles inválida."), 400
+        if count < MIN_M5_BARS or count > MAX_M5_BARS:
+            return jsonify(error=f"Use de {MIN_M5_BARS} a {MAX_M5_BARS} candles M5."), 400
+        port = app.extensions["scalper_mt5"]
+        catalog = port.market_watch_catalog()
+        if not catalog.get("available"):
+            return jsonify(error=catalog.get("detail") or "Market Watch indisponível."), 503
+        if symbol not in {item["broker_symbol"] for item in catalog.get("items", [])
+                          if item.get("trade_enabled")}:
+            return jsonify(error="Selecione um ativo negociável com o nome exato do Market Watch."), 400
+        terminal = port.state()
+        account = terminal.get("account") or {}
+        if not terminal.get("connected") or not account.get("login") or not account.get("server"):
+            return jsonify(error="Conta MT5 indisponível."), 503
+        frames = {}
+        normalization = {}
+        contract = None
+        counts = {"M5": count, "M15": min(2000, (count + 2) // 3 + 260),
+                  "H1": min(1000, (count + 11) // 12 + 260)}
+        for frame in ("H1", "M15", "M5"):
+            response = port.historical_market_data(symbol, counts[frame], frame)
+            if not response.get("ok") or response.get("symbol") != symbol:
+                return jsonify(error=response.get("detail") or f"Histórico {frame} indisponível."), 409
+            evidence = response.get("time_normalization") or {}
+            if evidence.get("basis") != "UTC" or evidence.get("historical_timezone_verified") is not True:
+                return jsonify(error=f"Base UTC histórica {frame} não confirmada; replay bloqueado."), 409
+            frames[frame] = response.get("bars") or []
+            normalization[frame] = evidence
+            if contract is None:
+                contract = response.get("contract") or {}
+        try:
+            result = run_sr_replay(
+                symbol=symbol, frames=frames, contract=contract or {},
+                slippage_points=data.get("slippage_points", 0),
+                commission_per_lot_round_turn=data.get("commission_per_lot_round_turn", 0),
+                swap_long_per_lot_per_utc_rollover=data.get("swap_long_per_lot_per_utc_rollover", 0),
+                swap_short_per_lot_per_utc_rollover=data.get("swap_short_per_lot_per_utc_rollover", 0),
+                costs_confirmed=True)
+        except (ReplayValidationError, ValueError, TypeError) as exc:
+            return jsonify(error=str(exc)), 409
+        account_identity = hashlib.sha256(
+            f'{connector_terminal_id}:{account["login"]}@{account["server"]}'.encode()).hexdigest()
+        run_id = str(uuid.uuid4())
+        app.extensions["scalper_db"].save_sr_replay_run(
+            run_id=run_id, terminal_id=connector_terminal_id, account_sha256=account_identity,
+            symbol=symbol, result=result,
+            dataset={"frames": frames, "contract": contract,
+                     "time_normalization": normalization})
+        return jsonify(result={**result, "run_id": run_id},
+                       detail="Replay S/R concluído e salvo. Triagem OHLC; nenhum motor foi armado."), 200
 
     @app.get("/api/analyst/replays")
     def analyst_replays():
@@ -447,7 +574,8 @@ def create_app(*, database: Database | None = None, mt5: MT5Gateway | None = Non
             return jsonify(error="Envie os parâmetros do replay."), 400
         analyst_state = app.extensions["scalper_analyst"].snapshot().get("state", {})
         engine_state = app.extensions["scalper_engine"].snapshot().get("state", {})
-        if analyst_state.get("running") or engine_state.get("running"):
+        if (analyst_state.get("running") or engine_state.get("running")
+                or app.extensions["scalper_sr_research"].snapshot()["busy"]):
             return jsonify(error="Pare os motores antes de iniciar o replay; isso evita disputar o conector MT5 com a execução DEMO/REAL."), 409
         if data.get("costs_confirmed") is not True:
             return jsonify(error="Confirme que spread, slippage, comissão e swap foram informados com base na corretora."), 400
@@ -527,6 +655,8 @@ def create_app(*, database: Database | None = None, mt5: MT5Gateway | None = Non
 
     @app.post("/api/engine/start")
     def engine_start():
+        if app.extensions["scalper_sr_research"].snapshot()["busy"]:
+            return jsonify(ok=False, detail="Pare a pesquisa S/R antes de iniciar o motor; o conector MT5 é compartilhado."), 409
         data = _json_body() or {}
         mode = _bounded(data.get("mode"), 20)
         result = app.extensions["scalper_engine"].start(
@@ -717,6 +847,7 @@ def create_app(*, database: Database | None = None, mt5: MT5Gateway | None = Non
         app.extensions["scalper_engine"].stop(
             "Parado pela parada de emergência; confira as posições após a ação.")
         app.extensions["scalper_analyst"].stop()
+        app.extensions["scalper_sr_research"].stop()
         data = _json_body()
         confirmation = _bounded(data.get("confirmation") if data else "", 100)
         gateway = app.extensions["scalper_mt5"]

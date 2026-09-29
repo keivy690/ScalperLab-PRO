@@ -263,3 +263,13 @@ A restauração exige digitar `RESTAURAR BANCO LOCAL` e guarda uma cópia autom�
 O dia de risco é UTC, independente da sessão da estratégia. A referência mostra o horário real da primeira leitura; não representa automaticamente o patrimônio de meia-noite. Reinício/troca de motor preservam consumo e bloqueio no mesmo dia. Depósitos/saques e crédito são reconciliados por identidade dos negócios de saldo; histórico indisponível ou revisado bloqueia novas entradas. O limite considera variação de patrimônio da conta inteira e não garante uma perda máxima executada.
 
 Informações sobre chaves, procedência e validação de arquivos ficam no grupo recolhível **Integrações de pesquisa e informações do aplicativo**, no fim de Configurações. Os custos do replay pertencem ao painel de replay e o alvo das estratégias continua no perfil da regra. O replay existente ainda não usa automaticamente estes novos perfis de dimensionamento.
+
+## Pesquisa de zonas S/R Quant (29/09/2026)
+
+1. Abra **Risco e segurança → Pesquisa de zonas S/R**. Pare o Analista e o motor de estratégias antes de iniciar; eles compartilham o conector MT5.
+2. Escolha um ou dois símbolos exatos trazidos do Market Watch e clique em **Iniciar pesquisa**. O módulo lê H1, M15 e M5 fechados, sem enviar ordens. Ele começa desligado após cada reinício.
+3. Leia por ativo o regime, as zonas, os candidatos e os motivos de rejeição. Um candidato indica apenas uma hipótese em pesquisa; não equivale a uma ordem solicitada ou executada.
+4. Abra **Replay histórico S/R**, escolha um ativo, a amostra M5 e custos da corretora, confirme-os e execute. O relatório separa desenvolvimento e holdout, compara as três famílias com um baseline e salva o conjunto de dados e o hash. **Reproduzir último salvo (offline)** recalcula o último estudo sem consultar o MT5.
+5. Se o MT5 não confirmar que o histórico H1/M15/M5 está em UTC, a pesquisa ou o replay recusa os dados. Não altere o fuso manualmente para forçar resultado. Falta de histórico ou menos de 30 trades fechados no holdout implica amostra inconclusiva.
+
+Esta pesquisa permanece separada da execução DEMO/REAL. A regra antiga do Analista continua disponível; nenhuma família S/R foi habilitada para envio nesta etapa. Consulte `docs/IMPLEMENTACAO_SR_QUANT_2026-09-29.md` para critérios de promoção.
