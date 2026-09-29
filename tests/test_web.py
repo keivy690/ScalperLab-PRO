@@ -128,6 +128,26 @@ class WebTests(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertIn("Hash", response.json["error"])
 
+    def test_sr_live_replay_rejects_unverified_broker_time(self):
+        port = self.app.extensions["scalper_mt5"]
+        catalog = {"available": True, "items": [
+            {"broker_symbol": "EURUSD#", "trade_enabled": True}]}
+        with patch.object(port, "market_watch_catalog", return_value=catalog), \
+             patch.object(port, "state", return_value={
+                 "connected": True, "account": {"login": 1, "server": "demo"}}), \
+             patch.object(port, "historical_market_data", return_value={
+                 "ok": True, "symbol": "EURUSD#", "bars": [],
+                 "time_normalization": {"basis": "UTC",
+                                        "historical_timezone_verified": False}}) as history, \
+             patch("scalperlab.web.run_sr_replay") as replay:
+            response = self.client.post("/api/sr-quant/replay", headers=self.headers,
+                                        json={"symbol": "EURUSD#", "bars": 600,
+                                              "costs_confirmed": True})
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("UTC", response.json["error"])
+        history.assert_called_once()
+        replay.assert_not_called()
+
     def test_replay_does_not_compete_with_an_active_execution_engine(self):
         analyst = self.app.extensions["scalper_analyst"]
         with patch.object(analyst, "snapshot", return_value={"state": {"running": True}}):

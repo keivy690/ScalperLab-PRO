@@ -215,6 +215,7 @@ def create_app(*, database: Database | None = None, mt5: MT5Gateway | None = Non
                         "engine": engine_state,
                         "analyst": app.extensions["scalper_analyst"].snapshot(),
                         "sr_research": app.extensions["scalper_sr_research"].snapshot(),
+                        "sr_data_events": app.extensions["scalper_db"].list_sr_data_events(8),
                         "system_clock": clock_snapshot,
                         "ai": {"available": app.extensions["scalper_ai"].available,
                                "model": app.extensions["scalper_ai"].model},
@@ -431,6 +432,10 @@ def create_app(*, database: Database | None = None, mt5: MT5Gateway | None = Non
     @app.get("/api/sr-quant/evaluations")
     def sr_quant_evaluations():
         return jsonify(items=app.extensions["scalper_db"].list_sr_evaluations(100))
+
+    @app.get("/api/sr-quant/data-events")
+    def sr_quant_data_events():
+        return jsonify(items=app.extensions["scalper_db"].list_sr_data_events(100))
 
     @app.get("/api/sr-quant/replays")
     def sr_quant_replays():

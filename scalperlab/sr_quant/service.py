@@ -105,11 +105,16 @@ class SrResearchService:
                     bundle = read_live_bundle(self.port, symbol,
                                               frame_cache=self._frame_cache)
                     if not bundle.get("ok"):
+                        code = str(bundle.get("code") or "connector_unavailable")
                         result = {"symbol": symbol, "version": RULE_VERSION,
                                   "mode": "research_only", "order_eligible": False,
+                                  "code": code,
                                   "status": "DADOS_INSUFICIENTES", "detail": bundle.get("detail"),
                                   "frame_last_closed": {"M5": None},
-                                  "filter_counts": {"connector_unavailable": 1}}
+                                  "filter_counts": {code: 1}}
+                        self.database.save_sr_data_event(
+                            account_sha256=expected_identity, symbol=symbol,
+                            code=code, detail=str(bundle.get("detail") or "Dados MT5 indisponíveis."))
                     else:
                         result = evaluate_bundle(bundle)
                         result["connector_diagnostics"] = bundle["connector_diagnostics"]

@@ -39,15 +39,18 @@ def read_live_bundle(port: TradingPort, symbol: str, *,
             calls += 1
         if not result.get("ok"):
             return {"ok": False, "symbol": symbol, "timeframe": timeframe,
+                    "code": result.get("code") or "frame_unavailable",
                     "detail": result.get("detail") or "Histórico MT5 indisponível."}
         if result.get("symbol") != symbol:
             return {"ok": False, "symbol": symbol, "timeframe": timeframe,
+                    "code": "symbol_mismatch",
                     "detail": "O conector retornou outro símbolo; leitura cancelada."}
         temporal = result.get("time_normalization") or {}
         if temporal.get("basis") != "UTC" or (
                 timeframe in {"H1", "M15"}
                 and temporal.get("historical_timezone_verified") is not True):
             return {"ok": False, "symbol": symbol, "timeframe": timeframe,
+                    "code": "historical_utc_unverified",
                     "detail": "Base histórica UTC do timeframe não confirmada; pesquisa S/R suspensa."}
         if contract is None or timeframe == "M5":
             contract = result.get("contract") or {}
@@ -59,6 +62,7 @@ def read_live_bundle(port: TradingPort, symbol: str, *,
     calls += 1
     if not tick.get("ok"):
         return {"ok": False, "symbol": symbol,
+                "code": tick.get("code") or "tick_unavailable",
                 "detail": tick.get("detail") or "Cotação indisponível."}
     return {"ok": True, "symbol": symbol, "frames": frames,
             "time_normalization": normalization, "contract": contract or {}, "tick": tick,

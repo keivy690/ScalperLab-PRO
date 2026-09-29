@@ -272,4 +272,6 @@ Informações sobre chaves, procedência e validação de arquivos ficam no grup
 4. Abra **Replay histórico S/R**, escolha um ativo, a amostra M5 e custos da corretora, confirme-os e execute. O relatório separa desenvolvimento e holdout, compara as três famílias com um baseline e salva o conjunto de dados e o hash. **Reproduzir último salvo (offline)** recalcula o último estudo sem consultar o MT5.
 5. Se o MT5 não confirmar que o histórico H1/M15/M5 está em UTC, a pesquisa ou o replay recusa os dados. Não altere o fuso manualmente para forçar resultado. Falta de histórico ou menos de 30 trades fechados no holdout implica amostra inconclusiva.
 
+No terminal XMGlobal-MT5 7 consultado em 29/09/2026, H1 estava no horário do servidor e foi recusado. O serviço de relógio confirma o offset **atual**, mas não a regra histórica de mudança de horário. Enquanto essa regra não for documentada e conferida para o servidor, a pesquisa S/R mostrará dados insuficientes nesse terminal. O Analista SMA21 anterior não depende desta pesquisa.
+
 Esta pesquisa permanece separada da execução DEMO/REAL. A regra antiga do Analista continua disponível; nenhuma família S/R foi habilitada para envio nesta etapa. Consulte `docs/IMPLEMENTACAO_SR_QUANT_2026-09-29.md` para critérios de promoção.

@@ -122,6 +122,17 @@ class Database:
                 );
                 CREATE INDEX IF NOT EXISTS idx_sr_evaluations_created
                     ON sr_evaluations(created_at DESC);
+                CREATE TABLE IF NOT EXISTS sr_data_events (
+                    account_sha256 TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    code TEXT NOT NULL,
+                    event_bucket_utc INTEGER NOT NULL,
+                    created_at TEXT NOT NULL,
+                    detail TEXT NOT NULL,
+                    PRIMARY KEY(account_sha256, symbol, code, event_bucket_utc)
+                );
+                CREATE INDEX IF NOT EXISTS idx_sr_data_events_created
+                    ON sr_data_events(created_at DESC);
                 CREATE TABLE IF NOT EXISTS sr_replay_runs (
                     run_id TEXT PRIMARY KEY,
                     created_at TEXT NOT NULL,
@@ -161,6 +172,34 @@ class Database:
                 """DELETE FROM sr_evaluations WHERE rowid NOT IN
                 (SELECT rowid FROM sr_evaluations ORDER BY created_at DESC LIMIT 20000)"""
             )
+
+    def save_sr_data_event(self, *, account_sha256: str, symbol: str,
+                           code: str, detail: str) -> None:
+        """Keep one diagnostic per reason and five-minute bucket."""
+        if len(account_sha256) != 64 or not symbol or not code:
+            raise ValueError("Evento de qualidade S/R inválido.")
+        bucket = int(datetime.now(UTC).timestamp()) // 300 * 300
+        with self.connect() as connection:
+            connection.execute(
+                """INSERT INTO sr_data_events
+                (account_sha256, symbol, code, event_bucket_utc, created_at, detail)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(account_sha256, symbol, code, event_bucket_utc) DO NOTHING""",
+                (account_sha256, symbol[:64], code[:80], bucket, now_iso(), detail[:500]),
+            )
+            connection.execute(
+                """DELETE FROM sr_data_events WHERE rowid NOT IN
+                (SELECT rowid FROM sr_data_events ORDER BY created_at DESC LIMIT 5000)"""
+            )
+
+    def list_sr_data_events(self, limit: int = 20) -> list[dict[str, Any]]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                """SELECT symbol, code, event_bucket_utc, created_at, detail
+                FROM sr_data_events ORDER BY created_at DESC LIMIT ?""",
+                (max(1, min(int(limit), 200)),),
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def list_sr_evaluations(self, limit: int = 100) -> list[dict[str, Any]]:
         with self.connect() as connection:

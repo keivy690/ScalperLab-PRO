@@ -576,6 +576,13 @@
     }).join("") : '<div class="empty-card">Nenhuma avaliação desta sessão.</div>';
   }
 
+  function renderSrDataEvents(items = []) {
+    const host = $("#sr-data-events");
+    if (!host) return;
+    host.classList.toggle("hidden", !items.length);
+    host.innerHTML = items.length ? `<strong>Últimos bloqueios de dados</strong>${items.slice(0, 5).map((item) => `<div><span>${escapeHtml(item.symbol)} · ${escapeHtml(item.code)}</span><small>${escapeHtml(item.detail)} · ${escapeHtml(item.created_at)}</small></div>`).join("")}` : "";
+  }
+
   async function startSrResearch() {
     const symbols = [$("#sr-symbol-1").value, $("#sr-symbol-2").value].filter(Boolean);
     if (!symbols.length || new Set(symbols).size !== symbols.length) {
@@ -897,6 +904,7 @@
     renderEngine(snapshot.engine, snapshot.strategies, mt5);
     renderAnalyst(snapshot.analyst);
     renderSrResearch(snapshot.sr_research);
+    renderSrDataEvents(snapshot.sr_data_events);
     renderRiskSettings(snapshot);
     renderDashboardStatus(snapshot);
     renderDashboardAnalyst(snapshot.analyst);

@@ -85,6 +85,18 @@ class SrQuantTests(unittest.TestCase):
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0]["status"], "EVALUATED")
 
+    def test_data_quality_block_is_persisted_once_per_bucket(self):
+        with tempfile.TemporaryDirectory() as directory:
+            database = Database(Path(directory) / "sr.sqlite3")
+            for _ in range(2):
+                database.save_sr_data_event(
+                    account_sha256="a" * 64, symbol="EURUSD#",
+                    code="historical_timezone_required",
+                    detail="Histórico do broker sem regra histórica UTC.")
+            rows = database.list_sr_data_events()
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["symbol"], "EURUSD#")
+
     def test_service_rejects_duplicate_selection_without_order_capability(self):
         port = MagicMock()
         database = MagicMock()
