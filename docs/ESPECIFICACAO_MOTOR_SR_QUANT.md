@@ -1,6 +1,6 @@
 # Especificação de pesquisa: motor de zonas e comportamento do preço
 
-**Estado:** proposta para pesquisa, sem ativação de ordens.
+**Estado em 29/09/2026:** a primeira versão de pesquisa e replay foi implementada nesta branch, sempre sem ativação de ordens. Este arquivo conserva a especificação e pode conter etapas ainda não aceitas empiricamente. Confira [implementação](IMPLEMENTACAO_SR_QUANT_2026-09-29.md) e [estado atual](ESTADO_ATUAL.md).
 
 **Origem:** `Texto colado.txt` fornecido pelo usuário em 29/09/2026.
 **Universo inicial:** símbolos exatos do Market Watch que representem EURUSD e ouro no broker conectado. O nome, contrato e possibilidade de negociação vêm do conector; não há símbolo fixo no código.

@@ -1,5 +1,7 @@
 # Implementação do motor de pesquisa S/R Quant — 29/09/2026
 
+**Estado:** implementado na branch como pesquisa somente leitura. Não foi incluído automaticamente no executável piloto anterior e não teve replay real aceito no servidor XMGlobal observado; veja [estado atual](ESTADO_ATUAL.md).
+
 ## Escopo entregue nesta branch
 
 - Núcleo puro em `scalperlab/sr_quant/core.py`: lê H1/M15/M5 fechados, classifica regime, extrai zonas de pivôs confirmados e avalia pullback em tendência, rompimento com reteste e falso rompimento lateral. Cada rejeição tem código e contador. A saída é sempre `research_only` e `order_eligible=false`.

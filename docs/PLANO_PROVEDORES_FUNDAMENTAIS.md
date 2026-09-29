@@ -1,6 +1,6 @@
 # Plano completo — provedores de calendário, notícias e fundamentos
 
-**Status:** atualizado com calendário nativo do MT5 e ponte MQL5 somente de leitura. A conexão só será considerada operacional depois de iniciar o Service e observar um snapshot fresco associado à conta atual.
+**Status revisto em 29/09/2026:** ClockService e CalendarService MQL5 estão implementados; houve publicação recente observada na instalação de referência, mas cada conta/terminal ainda precisa de snapshot fresco e identidade correspondente. Notícias e séries macro licenciadas continuam no plano, sem adaptador direcional pronto. [Estado atual](ESTADO_ATUAL.md).
 
 ## 1. Decisão recomendada
 
@@ -32,7 +32,7 @@ As páginas públicas de provedores não provam, sozinhas, que um plano específ
 
 - A API Python instalada (`MetaTrader5` 5.0.6180) não expõe funções calendar/news/economic. O MT5 XM Global build 6182 estava conectado a uma conta DEMO USD durante a consulta; nenhum pedido de negociação foi enviado.
 - O calendário pode ser consultado por MQL5 com `CalendarValueHistory`, `CalendarEventById` e `CalendarCountryById`, usando `MqlCalendarValue`, `MqlCalendarEvent` e `MqlCalendarCountry`.
-- As notas oficiais do build 2005 descrevem MQL5 Services, que não dependem de gráficos e podem iniciar junto com o terminal. A ponte está em `mt5/ScalperLabCalendarService.mq5`; ainda requer compilação, inclusão/inicialização no terminal e confirmação de snapshot atual.
+- As notas oficiais do build 2005 descrevem MQL5 Services, que não dependem de gráficos e podem iniciar junto com o terminal. A ponte foi implementada em `MT5/ScalperLabCalendarService.mq5` e o ClockService foi separado; ambos foram compilados/instalados na máquina de referência depois desta descoberta. Em cada terminal novo, continuam necessários instalação, início da instância e confirmação de snapshot atual.
 - O serviço preserva horário de evento no fuso de negociação do MT5. A aplicação não o rotula como UTC e não converte surpresa macro em recomendação direcional.
 - A plataforma tem feed de notícias na interface, mas a referência MQL5 consultada não documenta API de leitura para esse feed. Notícias continuam dependendo de provedor externo ou API específica do broker.
 - Calendário nativo não substitui notícias, séries macro com vintages, fundamentos empresariais, dados COT ou oferta/demanda de commodities. A análise continua `PARCIAL`.

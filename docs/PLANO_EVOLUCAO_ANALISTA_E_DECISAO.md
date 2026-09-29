@@ -1,5 +1,7 @@
 # Plano de evolução do Analista e do motor de decisão
 
+**Plano datado, revisto em 29/09/2026.** O calendário parcial, o replay SMA21 e a pesquisa/replay S/R já estão no código. Notícias/macro estruturadas, validação por ticks, evidência fora da amostra e promoção S/R para execução permanecem pendentes; confira [ESTADO_ATUAL.md](ESTADO_ATUAL.md).
+
 **Estado da leitura:** 25/09/2026
 **Escopo:** camada fundamental, coerência entre análise e execução, validação da regra experimental e eventual uso de aprendizado de máquina.
 

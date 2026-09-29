@@ -1,5 +1,7 @@
 # Lote e risco em Configurações
 
+**Entrega datada de 28/09/2026.** A operação atual e os limites efetivos estão no [manual](MANUAL_INSTALACAO_E_USO.md) e em [ESTADO_ATUAL.md](ESTADO_ATUAL.md). Os valores iniciais citados aqui não são um teto fixo para todos os perfis.
+
 ## Implementado
 - Perfis persistentes para Analista e Estratégias: risco percentual, valor monetário ou lote fixo; teto de lote e reserva da margem livre.
 - Limite diário compartilhado pela conta, persistente entre reinícios. Referência desde a primeira leitura registrada, com reconciliação de depósitos e saques.

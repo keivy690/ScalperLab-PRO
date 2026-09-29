@@ -1,5 +1,7 @@
 # Relógio independente do calendário
 
+**Registro de implantação de 28/09/2026.** Os dois Services foram observados como serviços reais nessa instalação; esta evidência não comprova a regra histórica de fuso necessária ao replay S/R nem a operação de outro terminal. Consulte [estado atual](ESTADO_ATUAL.md).
+
 ## Causa adicional identificada na validação
 Os publicadores anteriores não declaravam `#property service`: apesar do nome e da pasta, eram compilados como scripts vinculados a gráficos. Os logs reais mostravam símbolo/timeframe ao lado do nome. A declaração foi adicionada aos dois arquivos, com registro de `PROGRAM_SERVICE` no início e verificação obrigatória no build. Compilar sem erros, isoladamente, não comprovava que o tipo do programa estava correto.
 

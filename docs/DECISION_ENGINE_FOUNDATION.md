@@ -1,5 +1,7 @@
 # Fundamentos do analista de mercado
 
+**Estado revisado em 29/09/2026:** este texto explica a regra SMA21 existente. A pesquisa S/R Quant é um módulo separado, sem envio; veja [implementação S/R](IMPLEMENTACAO_SR_QUANT_2026-09-29.md) e [estado atual](ESTADO_ATUAL.md). A ponte de calendário MQL5 já existe, mas continua contexto parcial, não uma confirmação direcional.
+
 ## Objetivo
 
 O ScalperLab passa a ter uma camada de análise de mercado independente do catálogo de estratégias. O operador informa símbolos que existem no Market Watch e um timeframe; M15 é o padrão recomendado, e outros períodos aceitos pelo MT5 podem ser selecionados. O analista lê somente candles fechados e publica três visões separadas: técnica, quantitativa e fundamental.
@@ -42,7 +44,7 @@ O período, a amostra pequena e concentrada em ações brasileiras e o caráter 
 
 ### Análise fundamentalista
 
-Os PDFs explicam conceitos e exemplos históricos, mas não oferecem uma série atual de indicadores, comunicados ou calendário por símbolo. A pesquisa pública já cadastrada no ScalperLab não é um feed macro estruturado e atualizado para cada ativo. Por isso, esta camada reporta `indisponível`, nunca inventa viés fundamental.
+Os PDFs explicam conceitos e exemplos históricos, mas não oferecem séries atuais de indicadores ou comunicados por símbolo. A pesquisa pública cadastrada no ScalperLab não é um feed macro estruturado. O calendário MQL5 pode elevar a cobertura exibida para `PARCIAL` quando o snapshot é recente e corresponde à conta; sem ele, a camada reporta `indisponível`. Em nenhum caso inventa viés fundamental a partir desses dados.
 
 Ativos de classes diferentes exigem fontes distintas: moedas dependem de dados macro por países/moedas; ações dependem de demonstrações, eventos e dados da empresa; commodities e índices precisam de variáveis próprias do contrato e do subjacente. A integração precisa identificar a classe do símbolo e a cobertura real do provedor.
 
@@ -54,7 +56,7 @@ Essa definição é uma heurística de engenharia para ensaio, não uma estraté
 
 ## Próximos requisitos para decisão e execução
 
-1. Implementar fontes fundamentais estruturadas com timestamp, origem, revisão e tratamento por classe de ativo. A agenda econômica interna do terminal requer integração MQL5; ela não aparece entre as chamadas da API Python usadas pelo ScalperLab.
+1. Completar fontes fundamentais estruturadas com timestamp, origem, revisão e tratamento por classe de ativo. A agenda econômica interna já é lida pela ponte MQL5 somente de leitura; ela não aparece entre as chamadas diretas da API Python e não substitui notícias e séries macro.
 2. Evoluir o replay OHLC atual para dados por tick ou comparar contra o Strategy Tester com ticks reais; incorporar custos históricos do broker, execução adversa e gaps. Manter o holdout atual intocado e depois avaliar uma nova janela independente/walk-forward.
 3. Comparar decisões do replay com os registros DEMO e revisar limites por classe de ativo antes de ampliar exposição. Nenhum retorno passado ou exemplo didático será convertido em promessa.
 

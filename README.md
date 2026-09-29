@@ -1,50 +1,55 @@
-# ScalperLab 1.0
+# ScalperLab PRO
 
-Desktop workspace for researching, reviewing and validating MetaTrader 5 strategies on Windows, with a first demo-only declarative execution engine.
+Aplicativo desktop Windows para pesquisar estratégias, acompanhar o MetaTrader 5 (MT5), analisar o mercado e executar regras experimentais sob controles de conta e risco. **Documentação revisada em 29/09/2026 para a branch `feature/sr-quant-engine`.** A implementação na branch não significa que o executável piloto já tenha sido reconstruído.
 
-## Safety status
+## Começar
 
-- The MT5 connector is read-only by default and reports the connected terminal/account state.
-- Demo order closing requires an explicit demo arming step and a confirmation phrase.
-- The explicit demo smoke test submits one minimum-size EURUSD buy (capped at 0.01 lot), then reconciles and immediately requests its close; it refuses to run when any position already exists.
-- The declarative engine includes adaptations for FX cross-sectional momentum, daily time-series momentum, broker-swap carry, weekend-gap reversal and London ORB. These are executable hypotheses, not exact reproductions of the studies or profitability claims. It defaults to observation and requires a separate confirmation to send orders on DEMO. It starts stopped after application restart.
-- Imported `.mq5`, `.py` and `.txt` files are analyzed and saved as review drafts; their source is never executed or compiled by the application. Text files may contain other indicator languages and require manual rule mapping before the engine can use them.
-- Engine limits are capped at 0.01 lot, one attempted entry per strategy session, one account position maximum, user-configured trade risk no higher than 0.25% and daily stop no higher than 1%. Risk estimates exclude costs and execution gaps.
-- REAL order paths exist for the analyst and declarative strategy engines. They require the matching REAL account, explicit text confirmation at every start, terminal/account trading permissions, fresh data, broker checks, configured risk limits, protective stops, no existing position or pending order, and post-send reconciliation. CONTEST accounts are rejected. REAL has not completed independent operational or statistical homologation; availability in code is not a readiness or profitability claim.
-- Search providers are optional. GitHub repository search works without a key; YouTube, Brave Search and OpenAI require keys supplied through process environment variables.
+1. Abra o terminal MT5 e confira conta, servidor e cotações.
+2. Em `C:\ScalperLab 1.0`, execute `Iniciar-ScalperLab.bat`. Na primeira abertura, ele prepara Python 3.12 e as dependências fixadas.
+3. Confira no cabeçalho do aplicativo a conta e o servidor efetivamente conectados.
+4. Consulte o [manual de instalação e uso](docs/MANUAL_INSTALACAO_E_USO.md) antes de iniciar qualquer modo de envio.
 
-## Run on Windows
-
-Use Python 3.12 (MetaTrader5's native package may not support the newest Python versions yet):
-
-For normal use, double-click `Iniciar-ScalperLab.bat` in the project folder. It reuses `.venv`, creates it with Python 3.12 if needed, checks pinned dependencies from `requirements.lock`, warns if the MT5 terminal is not open, and launches the desktop interface. Search keys remain optional and are not requested or stored by the launcher.
-
-For a Windows pilot package, install the development dependencies and run `powershell -ExecutionPolicy Bypass -File .\build-windows-pilot.ps1`. The script creates a PyInstaller `onedir` bundle under `dist\ScalperLab` and a ZIP for transfer. The Python MT5 connector and its native API are bundled with the app; the read-only MQL5 calendar service and an assisted terminal installer are included as separate files. This is a test package, not a signed installer; see `docs/BUILD_WINDOWS_PILOT.md` for prerequisites and validation steps.
+Alternativa pelo PowerShell, com Python 3.12 instalado:
 
 ```powershell
+Set-Location 'C:\ScalperLab 1.0'
 py -3.12 -m venv .venv
-.\.venv\Scripts\python -m pip install -r requirements.lock
-.\.venv\Scripts\python run.py
+.\.venv\Scripts\python.exe -m pip install -r requirements.lock
+.\.venv\Scripts\python.exe run.py
 ```
 
-Install and log in to the MetaTrader 5 desktop terminal separately. ScalperLab does not save the terminal password.
+O conector de mercado e ordens usa a biblioteca Python `MetaTrader5` e o terminal local. `ScalperLabClockService` e `ScalperLabCalendarService` são serviços MQL5 **somente de leitura**, instalados separadamente no MT5 para relógio e calendário; nenhum deles envia ordens. O banco fica em `%USERPROFILE%\ScalperLabData\scalperlab.sqlite3`, fora do código e do pacote.
 
-Developer verification uses the separate test dependencies:
+## O que está disponível
 
-```powershell
-.\.venv\Scripts\python -m pip install -r requirements-dev.lock
-.\.venv\Scripts\python -m pytest -q
-```
+- **Analista de mercado:** regra experimental técnica e quantitativa de pullback na SMA 21. Observação não envia ordens; DEMO e REAL têm caminhos de envio condicionados a confirmação e preflight. Disponibilidade técnica de REAL não é homologação.
+- **Estratégias cadastradas:** cinco adaptações declarativas executáveis; arquivos `.mq5`, `.py` e `.txt` importados são material de revisão e não são executados automaticamente.
+- **Pesquisa S/R Quant:** três famílias de hipóteses em H1/M15/M5, avaliação persistida e replay cronológico, sempre `research_only` e **sem caminho de ordens**. No MT5 XMGlobal consultado em 29/09/2026, o histórico ainda não tinha a base UTC verificada; pesquisa e replay reais ficaram bloqueados por qualidade temporal.
+- **Pesquisa pública e IA opcional:** GitHub e feeds; Brave, YouTube e resumo via OpenAI dependem de chaves de ambiente. O calendário MT5 é contexto parcial; notícias e séries macro estruturadas não estão integradas ao gatilho atual.
+- **Risco:** perfis separados de Analista e Estratégias para dimensionamento por percentual, valor ou lote fixo com teto, reserva de margem e limite diário compartilhado. O teste de integração DEMO permanece limitado a 0,01 lote.
 
-Optional provider variables: `SCALPERLAB_BRAVE_API_KEY`, `SCALPERLAB_YOUTUBE_API_KEY`, `OPENAI_API_KEY`, and `SCALPERLAB_AI_MODEL`.
+O aplicativo inicia com motores parados. Uma tela indicando “DEMO ativo” informa armamento, não ordem executada. Só a reconciliação com o MT5 confirma uma posição. Nenhuma regra atual tem vantagem estatística demonstrada nesta instalação.
 
-The database and imported strategy text are stored under `%USERPROFILE%\ScalperLabData\`, outside this project directory.
+## Documentação
 
-## Project map
+| Documento | Finalidade |
+| --- | --- |
+| [Estado atual e pendências](docs/ESTADO_ATUAL.md) | Referência de capacidade, evidência e lacunas por módulo |
+| [Manual de instalação e uso](docs/MANUAL_INSTALACAO_E_USO.md) | Instalação, MT5, Services, telas, risco, replay, recuperação |
+| [Arquitetura](docs/ARCHITECTURE.md) | Componentes, contratos, dados, tempo e execução |
+| [Referência técnica](docs/REFERENCIA_TECNICA.md) | Rotas locais, armazenamento, Services e diagnóstico |
+| [Segurança e limites](docs/SAFETY_AND_LIMITS.md) | Condições de envio, suspensão e limitações |
+| [Pacote piloto Windows](docs/BUILD_WINDOWS_PILOT.md) | Conteúdo do `onedir`, início e aceitação do pacote |
+| [Pesquisa S/R Quant](docs/IMPLEMENTACAO_SR_QUANT_2026-09-29.md) | Entrega e critérios antes de considerar promoção a DEMO |
 
-- `scalperlab/`: local desktop service, MT5 adapter, source search, storage and validation.
-- `templates/` and `static/`: responsive dashboard.
-- `.agents/skills/`: nine project skills grouped by responsibility.
-- `tests/`: local regression tests; MT5 tests use a fake terminal and do not send orders.
+Os demais arquivos em `docs/` são especificações, planos e relatórios datados. Leia seu estado no início de cada arquivo; eles preservam a decisão e a evidência da época, enquanto [Estado atual e pendências](docs/ESTADO_ATUAL.md) orienta o uso da branch.
 
-See `docs/SAFETY_AND_LIMITS.md` and `docs/ARCHITECTURE.md` before enabling demo operations.
+## Estrutura
+
+- `scalperlab/`: backend, conector, motores, pesquisa, armazenamento e controles.
+- `templates/` e `static/`: interface local.
+- `MT5/` e `tools/`: fontes dos Services e ferramenta assistida para instalá-los.
+- `.agents/skills/`: nove especialidades do projeto.
+- `tests/`: verificações automatizadas do repositório.
+
+O pacote Windows pode ser gerado por `build-windows-pilot.ps1` com dependências de desenvolvimento instaladas. Antes de distribuí-lo, confira o manifesto e valide o novo executável em uma instalação Windows separada. O [plano de empacotamento](docs/PLANO_PACOTE_EXECUTAVEL.md) registra os critérios ainda pendentes.

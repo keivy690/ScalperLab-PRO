@@ -1,6 +1,6 @@
 # Pesquisa e proposta: lote, risco e margem
 
-Data: 28/09/2026. Escopo desta entrega: pesquisa de documentação dos projetos, comparação com o código local e especificação para implementação. Os controles descritos como proposta ainda não foram implementados nem habilitados.
+**Registro da pesquisa de 28/09/2026.** A frase “ainda não implementado” neste estudo se refere ao momento da pesquisa: os perfis, a prévia e a validação no gateway foram implementados depois. Para operar, use o [manual atual](MANUAL_INSTALACAO_E_USO.md) e a [entrega](IMPLEMENTACAO_LOTE_RISCO_2026-09-28.md). As constatações abaixo preservam o diagnóstico anterior à mudança.
 
 ## Referências verificadas
 

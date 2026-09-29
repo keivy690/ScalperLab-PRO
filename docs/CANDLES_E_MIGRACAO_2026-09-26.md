@@ -1,5 +1,7 @@
 # Candles e armazenamento unificado
 
+**Registro histórico de 26/09/2026.** A regra de conversão de caudas intradiárias recentes continua relevante, mas não comprova o fuso do histórico longo H1/M15/M5 do broker. A pesquisa S/R Quant recusa essa lacuna; veja [estado atual](ESTADO_ATUAL.md).
+
 ## Conversão isolada
 
 `bar_time.py` trata somente timestamps de barras. Os controles de Windows/NTP, `normalize_tick_time`, referência MQL5 e renovação do relógio não foram alterados nesta etapa.

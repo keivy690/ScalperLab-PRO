@@ -1,5 +1,7 @@
 # Correção de divergência UTC entre ativos
 
+**Registro histórico de 26/09/2026.** O ClockService independente e a verificação atual de conta/offset são descritos em [RELOGIO_INDEPENDENTE.md](RELOGIO_INDEPENDENTE.md). Um offset recente não fornece a regra sazonal do histórico para replay S/R; veja [estado atual](ESTADO_ATUAL.md).
+
 ## Causa e mudança
 
 O código anterior arredondava a diferença entre o último tick e o Windows para deduzir o fuso. Uma cotação antiga por um múltiplo de 15 minutos podia aparentar outro fuso e tornar-se falsamente recente. Isso provocava divergências entre ativos de mercados fechados e criptomoedas com negociação recente.

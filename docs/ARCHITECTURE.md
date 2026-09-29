@@ -1,4 +1,6 @@
-# Arquitetura inicial
+# Arquitetura atual — ScalperLab PRO
+
+**Revisão:** 29/09/2026, branch `feature/sr-quant-engine`. O [estado atual](ESTADO_ATUAL.md) distingue a implementação da branch de um executável antigo.
 
 ## Processo desktop local
 
@@ -8,12 +10,15 @@ O shell pywebview apresenta a interface responsiva. Um serviço Flask temporári
 
 - `research.py`: pesquisa opcional GitHub, Brave, YouTube e feeds RSS/Atom; guarda URL, data, origem e trecho curto.
 - `strategy_validation.py`: análise estática de `.py` em subprocesso, verificações estruturais para `.mq5` e classificação de `.txt`; não executa nem compila as fontes. A descrição sugerida é apenas apoio à revisão.
-- `mt5_gateway.py`: leitura do terminal/conta/posições e fechamento de posições em demo após armamento e confirmação.
+- `mt5_gateway.py`: leitura do terminal/conta/mercado, cálculo e pré-verificação de ordens, envio e fechamento condicionados à conta e às confirmações do fluxo.
 - `trading/ports.py`: contratos `TradingPort` (consumido pelos motores) e `ConnectorV1` (fronteira de terminal), sem dependência de SDK de corretora nas estratégias.
 - `trading/models.py`: símbolo normalizado por identidade canônica e nome real do broker, com metadados de preço, volume e permissão de negociação.
 - `connectors/`: `ConnectorManager` mantém configurações e conectores sob IDs independentes; `discovery.py` procura instalações comuns do MT5 no Windows sem iniciá-las.
 - `market_analyst.py`: leitura contínua de até 12 símbolos/timeframe do MT5. Mantém observação sem ordens ou pode armar caminhos DEMO/REAL independentes com confirmação específica. A regra experimental de pullback usa candles fechados, confluência técnica/quantitativa e retomada da SMA 21; calcula stop/alvo e dimensiona pelo risco do MT5. O calendário MQL5 pode acrescentar contexto fundamental parcial; notícias e séries macroeconômicas continuam indisponíveis.
 - `execution_engine.py` / `strategy_rules.py`: monitor persistente de sinais declarativos M1/D1 para cinco adapters registrados; opera em observação ou pode enviar em DEMO/REAL após confirmação explícita e verificações de conta, risco e terminal. A existência do caminho REAL não representa homologação.
+- `sr_quant/core.py`, `service.py` e `replay.py`: três famílias de pesquisa H1/M15/M5, observação opcional e replay cronológico. O núcleo é puro; o serviço usa `TradingPort` para leitura e **não expõe envio**. Toda avaliação permanece `research_only`.
+- `risk_settings.py` / `position_sizing.py`: perfis persistidos de Analista e Estratégias, dimensionamento, limite diário e margem.
+- `mt5_calendar_bridge.py`: leitura dos snapshots publicados pelos Services MQL5; relógio e calendário têm responsabilidades separadas.
 - `db.py`: SQLite por usuário em `%USERPROFILE%\ScalperLabData`; não fica junto ao código instalado.
 - `ai_assistant.py`: resumo opcional via Responses API, somente após ação do usuário e com os itens públicos selecionados.
 
@@ -61,7 +66,7 @@ O marcador pode ser alterado ou removido pelo broker. Nesse caso, tickets retorn
 
 O backend aceita corpos HTTP de até 3 MB. A pesquisa aceita até 12 feeds e aplica um orçamento global de 35 segundos, usando conexão HTTPS direta para preservar a verificação do endereço do servidor; redes que exigem proxy explícito podem não conseguir coletar fontes nesta versão.
 
-Tetos codificados: 0,01 lote, uma tentativa por sessão para ORB/gap e por candle D1 fechado nas regras diárias, nenhuma posição preexistente por conta e perda diária de 0,1–1% (limite escolhido no perfil). Risco por ordem é limitado a 0,25% e o lote é calculado com `order_calc_profit`; estimativa não inclui comissão, swap, slippage, gaps ou falha de stop. Ao parar o motor, posições abertas permanecem no MT5 e dependem de SL/TP aceitos pelo servidor ou ação posterior do usuário. Ao reiniciar o app, o motor permanece parado.
+Os perfis atuais permitem dimensionamento por percentual, valor monetário ou lote fixo com teto de risco, lote máximo e reserva de margem. O limite diário é configurado e compartilhado por conta/dia UTC; o gateway recalcula perda potencial com `order_calc_profit` e margem com funções do MT5. O **teste de integração DEMO** continua limitado a 0,01 lote. A regra declarativa limita tentativas por sessão/candle conforme o adaptador, e não há nova entrada enquanto a conta tiver posição. Estimativas não incluem todos os custos, slippage, gaps ou falha de stop. Ao parar o motor, posições abertas permanecem no MT5 e dependem de SL/TP aceitos pelo servidor ou ação posterior do usuário. Ao reiniciar o app, o motor permanece parado.
 
 Descrições livres e arquivos `.py`/`.mq5`/`.txt` não têm contrato executável e nunca são interpretados pelo motor. Só regras declarativas explicitamente suportadas podem ser configuradas; código importado exige tradução e homologação manual. A conta CONTEST não pode iniciar motores de ordem. A conta REAL possui caminhos de envio com confirmações e controles próprios, mas não está homologada para operação real.
 
@@ -69,11 +74,19 @@ O analista de mercado é um caminho adicional e não depende de uma estratégia 
 
 O estado operacional apresentado no cabeçalho e no KPI do painel é derivado em um único ponto a partir dos estados do Analista e do motor de estratégias. “Modo DEMO/REAL ativo” significa execução armada e elegível a tentar entradas; não significa ordem executada. Os dois motores só registram ordem confirmada depois de o gateway encontrar uma posição correlacionada no terminal e verificar SL/TP. Aceite sem reconciliação conclusiva aparece como pendente/desconhecido e suspende o motor sem repetir o envio. A última análise do ciclo é preservada mesmo que o motor se desarme durante esse ciclo.
 
-## Extensão futura
+## Pesquisa S/R Quant e persistência
+
+`SrResearchService` inicia somente por ação do usuário, aceita no máximo dois nomes exatos do Market Watch e fica desligado após reinício. A API impede pesquisa simultânea com Analista ou motor declarativo ativos. H1/M15 são reutilizados até o próximo fechamento esperado; M5 e tick são relidos por ciclo. Falha de base temporal ou dado incompleto gera evento de qualidade, não sinal alternativo.
+
+`sr_evaluations` guarda avaliações por conta, símbolo, versão e candle M5; `sr_data_events` guarda falhas de qualidade; `sr_replay_runs` guarda entradas, premissas, relatório e hash para reprodução offline. A migração SQLite é aditiva. O replay chama o mesmo avaliador e separa desenvolvimento/holdout 70/30, com aproximação de custos e execução em OHLC. Não acessa o gateway de ordens.
+
+Para replay histórico, a base UTC de **cada série** H1/M15/M5 deve ser comprovada. O offset atual do ClockService não representa as regras sazonais de datas antigas. A consulta real XMGlobal de 29/09/2026 recusou H1 por esse motivo.
+
+## Empacotamento e extensão futura
 
 ### Empacotamento desktop Windows
 
-O pacote piloto PyInstaller `onedir` inclui o aplicativo e o SDK Python `MetaTrader5`, incluindo seu módulo nativo Windows. O `ProcessMT5Connector` cria o worker MT5 usando o mesmo executável desktop em modo congelado; não há um `conector.exe` adicional nem um EA de negociação para instalar no terminal. O arquivo `.mq5/.ex5` separado é apenas o Service de calendário MQL5, incluído em `_internal/MT5` e copiado para a instalação escolhida por uma ferramenta assistida. O Service precisa ser iniciado no Navegador do próprio MT5 e não envia ordens. O pacote ainda requer terminal MT5 e WebView2 instalados no computador.
+O pacote piloto PyInstaller `onedir` inclui o aplicativo e o SDK Python `MetaTrader5`, incluindo seu módulo nativo Windows. O `ProcessMT5Connector` cria o worker MT5 usando o mesmo executável desktop em modo congelado; não há um `conector.exe` adicional nem um EA de negociação para instalar no terminal. Os pares `.mq5/.ex5` separados são `ScalperLabClockService` e `ScalperLabCalendarService`, incluídos em `_internal/MT5` e copiados para a instalação escolhida por uma ferramenta assistida. Os Services precisam ser iniciados no Navegador do próprio MT5 e não enviam ordens. O pacote ainda requer terminal MT5 e WebView2 instalados no computador. Um piloto antigo não incorpora automaticamente a revisão desta branch.
 
 ### Ciclo de vida do Connector v1
 

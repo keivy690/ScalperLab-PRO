@@ -1,5 +1,7 @@
 # Plano de ação — conector MT5 e dados para decisão
 
+**Plano evolutivo, revisado em 29/09/2026.** Partes de conta, ordens pendentes, histórico para reconciliação, margem, ClockService e CalendarService já existem no código; notícias e fundamentos estruturados, regra histórica de fuso para replay S/R e homologação REAL continuam pendentes. A situação operacional está em [ESTADO_ATUAL.md](ESTADO_ATUAL.md); itens abaixo marcados como plano não são prova de entrega.
+
 ## Estado e objetivo
 
 O conector atual consulta o terminal MT5 local e entrega ao motor: identificação básica da conta, saldo/equity, especificação do ativo, ticks, candles fechados, posições abertas e resultado de pedidos enviados. O MT5 Python não constitui, sozinho, uma fonte completa de calendário econômico, notícias ou fundamentos empresariais. Essas camadas requerem provedores separados e integração com proveniência, timestamps, cobertura e estado de indisponibilidade.

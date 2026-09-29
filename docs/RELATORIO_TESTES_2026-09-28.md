@@ -1,5 +1,7 @@
 # Validação de lote, risco, margem e integração MT5
 
+**Relatório histórico de 28/09/2026.** Evidências posteriores do relógio e da pesquisa S/R estão em [RELOGIO_INDEPENDENTE.md](RELOGIO_INDEPENDENTE.md) e [IMPLEMENTACAO_SR_QUANT_2026-09-29.md](IMPLEMENTACAO_SR_QUANT_2026-09-29.md). Nenhuma dessas baterias homologa operação REAL ou comprova rentabilidade; veja [estado atual](ESTADO_ATUAL.md).
+
 **Atualização de 29/09/2026:** as pendências do Service descritas abaixo refletem a primeira rodada de 28/09. A validação posterior, incluindo 139 testes, prévia, replay, ordem DEMO de 0,02 lote com stop/alvo e retomada dos serviços após reinício do MT5, está registrada em [RELOGIO_INDEPENDENTE.md](RELOGIO_INDEPENDENTE.md). Os resultados desta primeira rodada permanecem como histórico do diagnóstico.
 
 ## Resultado desta rodada

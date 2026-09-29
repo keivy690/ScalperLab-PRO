@@ -1,5 +1,7 @@
 # Plano de entrega do executável — ScalperLab PRO
 
+**Estado em 29/09/2026:** plano de aceitação ainda aberto. O build script atual chama o instalador `Instalar-Servico-Calendario-MT5.bat/.ps1` embora ele copie **ClockService e CalendarService**. Renomeá-lo para representar os dois componentes continua uma melhoria pendente; o nome atual é o mostrado na estrutura real abaixo. O piloto anterior não contém necessariamente S/R Quant; [estado atual](ESTADO_ATUAL.md).
+
 ## Decisão de formato
 
 Gerar um pacote Windows `onedir`: `ScalperLab.exe` acompanhado de `_internal`, do validador de scripts e de um instalador assistido dos dois Services MQL5. O aplicativo depende de um MetaTrader 5 instalado e conectado; o pacote não contém o terminal nem credenciais da corretora. Entregar também um ZIP e um SHA-256. O instalador Windows tradicional fica para uma etapa posterior, após validação do pacote em outra instalação.
@@ -10,8 +12,8 @@ Estrutura esperada:
 ScalperLab/
   ScalperLab.exe
   ScalperLabStrategyValidator.exe
-  Instalar-Componentes-MT5.bat
-  Instalar-Componentes-MT5.ps1
+  Instalar-Servico-Calendario-MT5.bat
+  Instalar-Servico-Calendario-MT5.ps1
   LEIA-ME-PRIMEIRO.txt
   BUILD-MANIFEST.json
   _internal/
@@ -67,3 +69,5 @@ Se o novo pacote falhar, encerrar o aplicativo, manter os dados originais, reabr
 ## Estado na data deste plano
 
 Já existe um piloto `onedir` em `dist`, gerado em 28/09/2026. Ele contém os dois Services e um ZIP com SHA-256 válido. Os Services foram observados como `PROGRAM_SERVICE` na instalação atual e retomaram após reinício do MT5; o ScalperLab leu relógio recente e confirmou UTC. O piloto existente ainda não passou pela validação de inicialização e conector em uma instalação Windows separada. Este plano orienta o próximo build e sua aceitação; não considera o ZIP anterior uma entrega definitiva.
+
+Em 29/09/2026 a branch ganhou o S/R Quant em pesquisa somente leitura. Um novo build e a validação do item 10 são necessários para afirmar que o `.exe` inclui essa função. O script `build-windows-pilot.ps1` empacota o código Python pela especificação PyInstaller e verifica os dois Services; ele não executa por si só os ensaios operacionais desta lista.

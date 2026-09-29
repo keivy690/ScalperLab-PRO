@@ -1,5 +1,7 @@
 # Plano de ação: estratégias de zonas e comportamento do preço
 
+**Acompanhamento:** etapas de código para pesquisa e replay foram implementadas em 29/09/2026; aceite empírico com histórico UTC comprovado, promoção a DEMO e pacote novo continuam pendentes. As “constatações no código atual” abaixo registram a base **antes** desta implementação. Consulte [a entrega](IMPLEMENTACAO_SR_QUANT_2026-09-29.md) e [o estado atual](ESTADO_ATUAL.md).
+
 **Data:** 29/09/2026
 
 **Base funcional:** [ESPECIFICACAO_MOTOR_SR_QUANT.md](ESPECIFICACAO_MOTOR_SR_QUANT.md)
