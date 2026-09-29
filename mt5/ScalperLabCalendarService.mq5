@@ -1,4 +1,5 @@
 #property strict
+#property service
 #property version   "1.00"
 #property description "Servico local somente leitura: exporta o calendario economico do MT5 para o ScalperLab."
 
@@ -129,6 +130,7 @@ bool PublishCalendar()
 
 void OnStart()
   {
+   PrintFormat("ScalperLab Calendar: tipo=%s.",EnumToString((ENUM_PROGRAM_TYPE)MQLInfoInteger(MQL_PROGRAM_TYPE)));
    if(InpRefreshSeconds < 15 || InpDaysBack < 0 || InpDaysForward < 1 || InpDaysForward > 30)
      {
       Print("ScalperLab Calendar Service: parametros fora dos limites.");

@@ -121,9 +121,17 @@ def _validate_text_file(source: str) -> dict[str, Any]:
 
 
 def _validate_python(source: str) -> dict[str, Any]:
+    if getattr(sys, "frozen", False):
+        checker = Path(sys.executable).resolve().with_name("ScalperLabStrategyValidator.exe")
+        if not checker.is_file():
+            return {"ok": False, "kind": "py",
+                    "summary": "Validador isolado ausente no pacote ScalperLab.", "warnings": []}
+        command = [str(checker)]
+    else:
+        command = [sys.executable, "-I", "-S", "-c", PYTHON_CHECKER]
     try:
         result = subprocess.run(
-            [sys.executable, "-I", "-S", "-c", PYTHON_CHECKER],
+            command,
             input=source, text=True, capture_output=True, timeout=3, check=False,
             env={"PATH": os.environ.get("PATH", ""), "PYTHONIOENCODING": "utf-8"},
         )

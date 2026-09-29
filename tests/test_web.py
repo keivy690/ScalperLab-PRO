@@ -1,9 +1,12 @@
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from scalperlab.db import Database
 from scalperlab.mt5_gateway import MT5Gateway
+from scalperlab.replay import run_pullback_replay
 from scalperlab.web import create_app
 
 
@@ -28,6 +31,17 @@ class WebTests(unittest.TestCase):
 
     def test_api_requires_session_token(self):
         self.assertEqual(self.client.get("/api/state").status_code, 403)
+
+    def test_clock_preflight_uses_read_only_path_and_never_repairs(self):
+        clock = self.app.extensions["scalper_system_clock"]
+        with patch.object(clock, "verify_read_only", return_value={
+                "status": "error", "detail": "Fonte UTC indisponível."}) as read_only, \
+             patch.object(clock, "verify_and_synchronize") as repair:
+            response = self.client.post("/api/system/clock/synchronize",
+                                        headers=self.headers, json={"read_only": True})
+        self.assertEqual(response.status_code, 409)
+        read_only.assert_called_once_with()
+        repair.assert_not_called()
 
     def test_wrong_host_and_origin_are_rejected(self):
         headers = {**self.headers, "Host": "attacker.example"}
@@ -62,6 +76,68 @@ class WebTests(unittest.TestCase):
         self.assertEqual(reconcile.status_code, 200)
         self.assertEqual(reconcile.json["items"], [])
 
+    def test_replay_routes_are_authenticated_and_keep_runs_local(self):
+        self.assertEqual(self.client.get("/api/analyst/replays").status_code, 403)
+        response = self.client.get("/api/analyst/replays", headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["items"], [])
+
+    def test_replay_does_not_compete_with_an_active_execution_engine(self):
+        analyst = self.app.extensions["scalper_analyst"]
+        with patch.object(analyst, "snapshot", return_value={"state": {"running": True}}):
+            response = self.client.post("/api/analyst/replay", headers=self.headers, json={
+                "symbol": "EURUSD#", "timeframe": "M15", "bars": 100,
+                "costs_confirmed": True,
+            })
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("Pare os motores", response.json["error"])
+
+    def test_replay_api_persists_snapshot_without_order_capability(self):
+        bars = [{"time": 1_700_000_000 + index * 300, "open": 1.0,
+                 "high": 1.01, "low": 0.999, "close": 1.001,
+                 "spread": 1, "tick_volume": 100}
+                for index in range(220)]
+        contract = {"point": 0.0001, "trade_tick_size": 0.0001,
+                    "trade_tick_value_profit": 1.0, "trade_tick_value_loss": 1.0,
+                    "volume_min": 0.01, "volume_step": 0.01,
+                    "trade_mode": 4, "chart_mode": 0}
+        fake_port = SimpleNamespace(
+            market_watch_catalog=lambda: {"available": True, "items": [
+                {"broker_symbol": "EURUSD#", "trade_enabled": True}]},
+            historical_market_data=lambda symbol, count, timeframe: {
+                "ok": True, "symbol": symbol, "bars": bars, "contract": contract,
+                "time_normalization": {"basis": "UTC", "server_utc_offset_seconds": 10800}},
+            state=lambda: {"connected": True,
+                           "account": {"login": "demo", "server": "Broker-DEMO", "mode": "DEMO"}},
+        )
+        self.app.extensions["scalper_mt5"] = fake_port
+        response = self.client.post("/api/analyst/replay", headers=self.headers, json={
+            "symbol": "EURUSD#", "timeframe": "M5", "bars": len(bars),
+            "slippage_points": 1, "commission_per_lot_round_turn": 0,
+            "swap_long_per_lot_per_utc_rollover": 0,
+            "swap_short_per_lot_per_utc_rollover": 0, "costs_confirmed": True,
+        })
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertIn("Nenhuma ordem", response.json["detail"])
+        self.assertEqual(response.json["result"]["comparison"]["baseline_label"],
+                         "Momentum de 20 candles: cruzamento do retorno para além de zero")
+        self.assertEqual(response.json["result"]["parameters"]["development_fraction"], 0.70)
+        runs = self.app.extensions["scalper_db"].list_replay_runs()
+        self.assertEqual(len(runs), 1)
+        saved = self.client.get(f"/api/analyst/replays/{runs[0]['run_id']}", headers=self.headers)
+        self.assertEqual(saved.status_code, 200)
+        self.assertEqual(len(saved.json["replay"]["dataset"]["bars"]), len(bars))
+        # Offline replay must not access any live connector capability.
+        self.app.extensions["scalper_mt5"] = object()
+        offline = self.client.post('/api/analyst/replay-saved', headers=self.headers, json={})
+        self.assertEqual(offline.status_code, 200, offline.json)
+        self.assertEqual(offline.json['result']['data_sha256'], response.json['result']['data_sha256'])
+        self.assertTrue(offline.json['result']['offline'])
+        with self.app.extensions['scalper_db'].connect() as db:
+            db.execute("UPDATE replay_runs SET data_sha256='tampered'")
+        bad = self.client.post('/api/analyst/replay-saved', headers=self.headers, json={})
+        self.assertEqual(bad.status_code, 409)
+
     def test_home_embeds_per_process_token(self):
         response = self.client.get("/", headers={"Host": "127.0.0.1:5000"})
         self.assertEqual(response.status_code, 200)
@@ -78,6 +154,7 @@ class WebTests(unittest.TestCase):
         self.assertNotIn("Estratégias cadastradas", dashboard)
         self.assertIn('<section class="view" id="view-strategies">', html)
         self.assertIn("<h1>Estratégias</h1>", html)
+        self.assertIn("Replay e validação cronológica", html)
 
     def test_home_rejects_unexpected_host(self):
         response = self.client.get("/", headers={"Host": "attacker.example"})

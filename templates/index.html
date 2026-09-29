@@ -18,6 +18,7 @@
   <symbol id="icon-arrows" viewBox="0 0 24 24"><path d="M4 7h15l-3-3M20 17H5l3 3"/></symbol>
   <symbol id="icon-shield" viewBox="0 0 24 24"><path d="M12 3 20 6v5c0 5.2-3.4 8.4-8 10-4.6-1.6-8-4.8-8-10V6l8-3Z"/><path d="m9 12 2 2 4-4"/></symbol>
   <symbol id="icon-settings" viewBox="0 0 24 24"><path d="M4 7h9m4 0h3M4 17h3m4 0h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></symbol>
+  <symbol id="icon-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></symbol>
   <symbol id="icon-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
   <symbol id="icon-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
   <symbol id="icon-refresh" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M5.6 9a7 7 0 0 1 11.8-2L20 12M4 12l2.6 5a7 7 0 0 0 11.8-2"/></symbol>
@@ -33,33 +34,37 @@
 </svg>
 <div class="app-shell">
   <aside class="sidebar" aria-label="Navegação principal">
-    <div class="brand-row"><img class="brand-logo" src="/static/brand/scalperlab-pro-mark.png" alt=""><div><strong>ScalperLab <span class="brand-pro">PRO</span></strong></div></div>
+    <div class="brand-row"><img class="brand-logo" src="/static/brand/scalperlab-pro-mark.png" alt=""><div><strong>ScalperLab <span class="brand-pro">PRO</span></strong></div><button id="sidebar-toggle" class="sidebar-toggle" type="button" aria-label="Expandir menu" aria-expanded="false" title="Expandir menu">›</button></div>
     <div class="side-label">MÓDULOS</div>
     <nav class="side-nav">
-      <button class="nav-item active" data-view="dashboard"><span><svg class="icon"><use href="#icon-grid"/></svg></span><b>Painel principal</b></button>
-      <button class="nav-item" data-view="strategies"><span><svg class="icon"><use href="#icon-strategy"/></svg></span><b>Estratégias</b><i id="strategy-nav-count">0</i></button>
-      <button class="nav-item" data-view="research"><span><svg class="icon"><use href="#icon-search"/></svg></span><b>Pesquisa de fontes</b></button>
-      <button class="nav-item" data-view="orders"><span><svg class="icon"><use href="#icon-arrows"/></svg></span><b>Ordens e posições</b></button>
-      <button class="nav-item" data-view="risk"><span><svg class="icon"><use href="#icon-shield"/></svg></span><b>Risco e segurança</b></button>
-      <button class="nav-item" data-view="settings"><span><svg class="icon"><use href="#icon-settings"/></svg></span><b>Configurações</b></button>
+      <button class="nav-item active" data-view="dashboard" title="Painel principal" aria-label="Painel principal"><span><svg class="icon"><use href="#icon-grid"/></svg></span><b>Painel principal</b></button>
+      <button class="nav-item" data-view="strategies" title="Estratégias" aria-label="Estratégias"><span><svg class="icon"><use href="#icon-strategy"/></svg></span><b>Estratégias</b><i id="strategy-nav-count">0</i></button>
+      <button class="nav-item" data-view="research" title="Pesquisa de fontes" aria-label="Pesquisa de fontes"><span><svg class="icon"><use href="#icon-search"/></svg></span><b>Pesquisa de fontes</b></button>
+      <button class="nav-item" data-view="orders" title="Ordens e posições" aria-label="Ordens e posições"><span><svg class="icon"><use href="#icon-arrows"/></svg></span><b>Ordens e posições</b></button>
+      <button class="nav-item" data-view="risk" title="Risco e segurança" aria-label="Risco e segurança"><span><svg class="icon"><use href="#icon-shield"/></svg></span><b>Risco e segurança</b></button>
+      <button class="nav-item clock-sync-button" id="clock-sync-button" data-action="clock-sync" title="Verificar e corrigir o horário do Windows e do MT5" aria-label="Verificar horário UTC"><span><svg class="icon"><use href="#icon-clock"/></svg></span><b>Verificar horário UTC</b></button>
+      <button class="nav-item" data-view="settings" title="Configurações" aria-label="Configurações"><span><svg class="icon"><use href="#icon-settings"/></svg></span><b>Configurações</b></button>
     </nav>
     <div class="sidebar-spacer"></div>
-    <div class="terminal-mini panel">
-      <div class="mini-heading"><span>TERMINAL MT5</span><span id="mini-terminal-state" class="state-dot muted" aria-label="Estado do terminal"></span></div>
-      <div class="mini-state" id="mini-terminal-label">Aguardando conexão</div>
-      <div class="mini-values"><div><small>SERVIDOR</small><strong id="mini-server">—</strong></div><div><small>CONTA</small><strong id="mini-login">—</strong></div></div>
-    </div>
     <button id="sidebar-emergency" class="sidebar-emergency"><svg class="icon"><use href="#icon-power"/></svg> <span id="sidebar-emergency-label">PARADA DE EMERGÊNCIA</span></button>
     <div class="sidebar-foot"><span class="state-dot muted" aria-hidden="true"></span> REAL exige armamento explícito</div>
   </aside>
 
   <main class="workspace">
     <div class="statusbar">
-      <div class="runtime-status"><span class="state-dot muted" id="runtime-dot" aria-hidden="true"></span><strong id="runtime-label">Aguardando conexão MT5</strong><span class="runtime-separator">|</span><span class="runtime-detail">Ordens REAL exigem confirmação em cada início</span></div>
+      <div class="runtime-status"><span class="state-dot muted" id="runtime-dot" aria-hidden="true"></span><strong id="runtime-label">Aguardando conexão MT5</strong><span class="runtime-separator">|</span><span id="header-account" class="runtime-detail">Conta indisponível</span><span id="automation-mode" class="status-chip">AUTOMAÇÃO PARADA</span></div>
       <div class="statusbar-meta"><span>SALDO</span><strong id="header-balance">—</strong><span class="statusbar-divider"></span><span id="header-server">Servidor indisponível</span><button class="icon-button statusbar-refresh" id="refresh-button" title="Atualizar dados" aria-label="Atualizar dados"><svg class="icon"><use href="#icon-refresh"/></svg></button></div>
     </div>
 
     <section class="view active" id="view-dashboard">
+      <section class="dashboard-status-strip" aria-label="Estado da conexão e da análise">
+        <div class="dashboard-status-item connection-status-item"><span id="dashboard-connection-dot" class="state-dot muted" aria-hidden="true"></span><span><small>Conector</small><strong id="dashboard-connection-status">Aguardando MT5</strong></span></div>
+        <div class="dashboard-status-item"><span><small>Conta</small><strong id="dashboard-account-mode">—</strong></span></div>
+        <div class="dashboard-status-item"><span><small>Ativos</small><strong id="dashboard-symbol-count">—</strong></span></div>
+        <div class="dashboard-status-item"><span><small>Timeframe</small><strong id="dashboard-timeframe">—</strong></span></div>
+        <div class="dashboard-status-item"><span><small>Tick mais antigo</small><strong id="dashboard-tick-age">—</strong></span></div>
+        <div class="dashboard-status-item last-cycle-item"><span><small>Último ciclo</small><strong id="dashboard-last-cycle">—</strong></span></div>
+      </section>
       <div class="kpi-grid">
         <article class="kpi-card panel"><div class="kpi-head"><span>Saldo da conta</span><span class="kpi-icon blue"><svg class="icon"><use href="#icon-wallet"/></svg></span></div><strong class="kpi-value" id="kpi-balance">—</strong><small id="kpi-currency">Aguardando MT5</small></article>
         <article class="kpi-card panel"><div class="kpi-head"><span>Resultado flutuante</span><span class="kpi-icon green"><svg class="icon"><use href="#icon-chart"/></svg></span></div><strong class="kpi-value" id="kpi-profit">—</strong><small id="kpi-equity">Patrimônio —</small></article>
@@ -70,8 +75,10 @@
       <div class="content-grid">
         <div class="primary-column">
           <section class="panel section-panel analyst-dashboard-panel">
-            <div class="section-heading"><div class="heading-title"><span class="section-icon cyan"><svg class="icon"><use href="#icon-activity"/></svg></span><div><h2>Análise contínua de mercado</h2><p id="dashboard-analyst-caption">Leituras técnica, quantitativa e fundamental dos ativos monitorados</p></div><span id="dashboard-analyst-count" class="count-chip">0 ativos</span></div><div class="heading-actions"><span id="dashboard-analyst-status" class="status-chip">PARADO</span><button class="button secondary" data-view="risk">Ver análise completa</button></div></div>
-            <div id="dashboard-analyst-results" class="analysis-grid"><div class="empty-card">Configure os ativos e inicie o Analista em Risco e segurança para exibir as leituras aqui.</div></div>
+            <div class="section-heading"><div class="heading-title"><span class="section-icon cyan"><svg class="icon"><use href="#icon-activity"/></svg></span><div><h2>Análise contínua de mercado</h2><p id="dashboard-analyst-caption">Modo Técnica + quantitativa · fundamental/calendário informativos</p></div><span id="dashboard-analyst-count" class="count-chip">0 ativos</span></div><div class="heading-actions"><span id="dashboard-analyst-status" class="status-chip">PARADO</span><button class="button secondary" data-view="risk">Ver análise completa</button></div></div>
+            <div class="analyst-overview"><strong id="dashboard-signal-summary">Aguardando dados da análise</strong><span>Sinal elegível não significa ordem executada; a confirmação vem do MT5.</span></div>
+            <div id="dashboard-analyst-results" class="dashboard-analysis-list"><div class="empty-card">Configure os ativos e inicie o Analista em Risco e segurança para exibir as leituras aqui.</div></div>
+            <button id="dashboard-show-more" class="dashboard-show-more hidden" type="button" data-action="toggle-dashboard-assets" aria-expanded="false">Ver outros ativos</button>
           </section>
           <section class="panel section-panel orders-panel">
             <div class="section-heading"><div class="heading-title"><span class="section-icon green"><svg class="icon"><use href="#icon-arrows"/></svg></span><div><h2>Monitor de posições abertas</h2><p id="orders-caption">Dados consultados diretamente do MT5</p></div><span class="count-chip green-chip" id="position-count">— posições</span></div><div class="inline-total"><span>Lucro flutuante</span><strong id="orders-profit">—</strong><button class="icon-button" data-action="refresh" title="Atualizar posições"><svg class="icon"><use href="#icon-refresh"/></svg></button></div></div>
@@ -82,14 +89,14 @@
         <aside class="right-column">
           <section class="panel risk-panel">
             <div class="section-heading compact"><div class="heading-title"><span class="section-icon red"><svg class="icon"><use href="#icon-shield"/></svg></span><div><h2>Blindagem operacional</h2></div></div><span id="risk-badge" class="risk-badge">PROTEGIDO</span></div>
-            <div class="live-block"><div class="live-block-head"><div><span class="state-dot red-dot">●</span><strong>Conta REAL</strong></div><span id="real-trading-label" class="state-label">DESARMADA</span></div><p>Conta/servidor são conferidos em cada ordem. Tetos atuais: 0,01 lote, uma posição e risco configurado.</p></div>
+            <div class="live-block"><div class="live-block-head"><div><span class="state-dot red-dot">●</span><strong>Conta REAL</strong></div><span id="real-trading-label" class="state-label">DESARMADA</span></div><p>Conta/servidor são conferidos em cada ordem. Lote e risco vêm de Configurações; uma posição por vez.</p></div>
             <button id="emergency-stop" class="button destructive full"><svg class="icon"><use href="#icon-power"/></svg> <span id="emergency-button-label">FECHAR POSIÇÕES DEMO</span></button>
             <small id="emergency-result" class="emergency-result" aria-live="polite">Aguardando comando de emergência nesta sessão.</small>
             <div class="demo-block"><div class="demo-heading"><span>Fechamento em conta DEMO</span><span id="demo-armed-label" class="state-label">DESARMADO</span></div><div class="demo-actions"><button class="button secondary full" id="arm-demo">Armar fechamento</button><button class="button secondary full" id="test-demo-order">Teste · 0,01 EURUSD</button></div></div>
             <div class="demo-block"><div class="demo-heading"><span>Fechamento em conta REAL</span><span id="real-close-armed-label" class="state-label">DESARMADO</span></div><button class="button secondary full" id="arm-real-close">Armar fechamento individual REAL</button></div>
             <small class="disclaimer">Confirmação e reconciliação obrigatórias; sem reenvio automático em timeout.</small>
           </section>
-          <section class="panel terminal-panel"><div class="section-heading compact"><div class="heading-title"><span class="section-icon cyan"><svg class="icon"><use href="#icon-terminal"/></svg></span><div><h2>Console do sistema</h2><p>Sem ticks ou dados simulados</p></div></div><span class="console-status"><i></i> LOCAL</span></div><div class="terminal-output" id="terminal-output"><div class="terminal-line muted-line">Aguardando atividade do aplicativo…</div></div><div class="terminal-footer"><span>Somente leitura</span><span id="terminal-update">—</span></div></section>
+          <section class="panel terminal-panel"><div class="section-heading compact"><div class="heading-title"><span class="section-icon cyan"><svg class="icon"><use href="#icon-terminal"/></svg></span><div><h2>Registro local de eventos</h2><p>Eventos do ScalperLab · somente leitura</p></div></div><span class="console-status"><i></i> LOCAL</span></div><div class="console-filter-row" role="group" aria-label="Filtrar registros"><button type="button" class="console-filter selected" data-log-filter="all" aria-pressed="true">Todos</button><button type="button" class="console-filter" data-log-filter="info" aria-pressed="false">Info</button><button type="button" class="console-filter" data-log-filter="warn" aria-pressed="false">Alerta</button><button type="button" class="console-filter" data-log-filter="error" aria-pressed="false">Erro</button></div><div class="terminal-output" id="terminal-output"><div class="terminal-line muted-line">Aguardando atividade do aplicativo…</div></div><div class="terminal-footer"><span>Registro local · não exibe ticks ao vivo</span><span id="terminal-update">—</span></div></section>
         </aside>
       </div>
       <footer class="footer-strip panel"><div class="footer-mark"><svg class="icon"><use href="#icon-activity"/></svg></div><div><strong>ScalperLab — área de pesquisa e validação</strong><span>Indicadores e estatísticas só aparecem quando calculados a partir de dados reais disponíveis.</span></div><div class="footer-meta"><span>MT5 Python API</span><i></i><span id="footer-data-status">Sem conexão</span></div></footer>
@@ -117,19 +124,43 @@
     <section class="view" id="view-risk">
       <div class="page-intro"><div><span class="eyebrow">CONTROLES</span><h1>Risco e segurança</h1><p>O motor começa parado; os tetos são explícitos e não garantem o resultado nem o risco realizado.</p></div></div>
       <section class="panel analyst-panel">
-        <div class="section-heading"><div class="heading-title"><span class="section-icon cyan"><svg class="icon"><use href="#icon-activity"/></svg></span><div><h2>Analista de mercado</h2><p>Análise contínua do gráfico MT5, sem exigir cadastro de estratégias</p></div></div><span id="analyst-status" class="status-chip">PARADO</span></div>
-        <p class="engine-disclaimer">M15 é o período recomendado. A regra experimental usa candle fechado, alinhamento técnico/quantitativo e retomada da SMA 21. O envio REAL requer confirmação textual por início, limita risco estimado a 0,10% do equity, lote a 0,01 e uma posição por conta. Dados fundamentais continuam indisponíveis; ordens não representam validação nem garantia de resultado.</p>
+        <div class="section-heading"><div class="heading-title"><span class="section-icon cyan"><svg class="icon"><use href="#icon-activity"/></svg></span><div><h2>Analista de mercado</h2><p>Análise contínua MT5 · modo Técnica + quantitativa</p></div></div><span id="analyst-status" class="status-chip">PARADO</span></div>
+        <div id="clock-health" class="clock-health" role="status" aria-live="polite">Horário ainda não validado nesta sessão. Ao iniciar o Analista, o sistema fará uma verificação automática somente de leitura.</div>
+        <p class="engine-disclaimer">A regra experimental usa candle fechado, alinhamento técnico/quantitativo e retomada da SMA 21. O calendário pode aparecer como contexto parcial, mas não define o lado nem bloqueia esta modalidade. Notícias e séries macroeconômicas não estão integradas. Esta regra não tem validação estatística.</p>
         <form id="analyst-form" class="engine-form analyst-form">
-          <label>Ativo(s) do Market Watch<input name="symbols" maxlength="500" required placeholder="Ex.: EURUSD, GOLD#, US500.cash"><small class="engine-help">Informe os nomes exatos visíveis no Market Watch; o servidor valida todos antes de iniciar. Até 12 ativos.</small></label>
+          <div class="symbol-picker-field"><div class="symbol-picker-heading"><span>Ativos visíveis no MT5</span><button class="button secondary" id="refresh-market-watch" type="button">Atualizar lista do MT5</button></div><input id="market-watch-search" type="search" autocomplete="off" placeholder="Filtrar por símbolo, classe ou moeda"><div id="market-watch-symbols" class="symbol-picker-list" role="group" aria-label="Selecione os ativos para análise"><div class="empty-card">Carregando símbolos do MT5…</div></div><small id="market-watch-status" class="engine-help">Selecione até 12 ativos que já estejam visíveis no Market Watch do terminal.</small></div>
           <label>Timeframe<select name="timeframe"><option>M15</option><option>M1</option><option>M2</option><option>M3</option><option>M4</option><option>M5</option><option>M6</option><option>M10</option><option>M12</option><option>M20</option><option>M30</option><option>H1</option><option>H2</option><option>H3</option><option>H4</option><option>H6</option><option>H8</option><option>H12</option><option>D1</option><option>W1</option><option>MN1</option></select><small class="engine-help">M15 vem selecionado como recomendação inicial; os demais períodos do MT5 estão disponíveis.</small></label>
-          <div class="engine-actions"><button class="button secondary" type="submit">Salvar perfil de análise</button><button class="button secondary" id="analyst-observe" type="button">Iniciar observação</button><button class="button primary" id="analyst-demo" type="button">Iniciar execução DEMO</button><button class="button danger" id="analyst-real" type="button">Iniciar execução REAL</button><button class="button danger" id="analyst-stop" type="button">Parar analista</button></div>
+          <label class="decision-mode-field">Base da decisão<select name="decision_basis"><option value="technical_quantitative">Técnica + quantitativa</option><option value="three_layer" disabled>Três camadas · aguarda dados fundamentais</option></select><small class="engine-help">Neste modo, calendário/fundamental é informativo e não entra no gatilho de ordem.</small></label>
+          <div class="decision-mode-note" role="note"><strong>MODO TÉCNICA + QUANTITATIVA</strong><span>Uma entrada elegível usa as regras de preço e risco descritas. O painel fundamental permanece visível, mas cobertura parcial ou ausente não conta como confirmação.</span></div>
+          <div class="engine-limits"><strong>Lote e risco</strong><span id="analyst-risk-summary"></span><button type="button" class="button secondary" data-view="settings">Configurar lote e risco</button></div>
+          <input type="hidden" name="symbols" value="">
+          <div class="engine-actions"><button class="button secondary" type="submit">Salvar perfil de análise</button><button class="button secondary" id="analyst-observe" type="button">Iniciar observação</button><button class="button primary" id="analyst-demo" type="button">Iniciar execução DEMO</button><button class="button danger" id="analyst-real" type="button">Iniciar execução REAL</button><button class="button danger" id="analyst-stop" type="button">Parar analista</button><small id="analyst-mode-help" class="engine-help" role="status"></small></div>
         </form>
         <div id="analyst-detail" class="engine-detail">Configure ativo(s) e inicie para monitorar. A análise começa parada após reinício.</div>
         <div id="analyst-results" class="analysis-grid"><div class="empty-card">Nenhuma análise disponível.</div></div>
       </section>
+      <section class="panel replay-panel">
+        <div class="section-heading"><div class="heading-title"><span class="section-icon cyan"><svg class="icon"><use href="#icon-chart"/></svg></span><div><h2>Replay e validação cronológica</h2><p>Pullback SMA 21 × baseline de momentum · histórico OHLC do broker · somente simulação</p></div></div><span class="status-chip">SEM ORDENS</span></div>
+        <p class="engine-disclaimer">Compara as regras com os mesmos custos e gestão de saída. Os 70% iniciais formam o contexto; os 30% finais ficam reservados como holdout. Exige pelo menos 200 candles. OHLC não substitui ticks reais nem homologa rentabilidade. Pare os motores antes de consultar o MT5.</p>
+        <form id="replay-form" class="engine-form replay-form">
+          <label>Ativo<select id="replay-symbol" name="symbol" required disabled><option value="">Carregando Market Watch…</option></select><small class="engine-help">Lista obtida do MT5; nome e sufixo do broker são preservados.</small></label>
+          <label>Timeframe<select name="timeframe"><option>M15</option><option>M5</option><option>M1</option><option>M2</option><option>M3</option><option>M4</option><option>M6</option><option>M10</option><option>M12</option><option>M20</option><option>M30</option><option>H1</option><option>H2</option><option>H3</option><option>H4</option><option>H6</option><option>H8</option><option>H12</option><option>D1</option><option>W1</option><option>MN1</option></select><small class="engine-help">Use um período compatível com o histórico disponível no terminal.</small></label>
+          <label>Candles fechados<input name="bars" type="number" min="200" max="2500" step="1" value="1200" required><small class="engine-help">Mínimo de 200 para reservar contexto e holdout; máximo de 2.500 por execução.</small></label>
+          <label>Slippage estimado (pontos por lado)<input name="slippage_points" type="number" min="0" max="100" step="0.1" value="1" required><small class="engine-help">Premissa aplicada na entrada e saída.</small></label>
+          <label>Comissão ida e volta (moeda da conta por lote)<input name="commission_per_lot_round_turn" type="number" min="0" max="10000" step="0.01" value="0" required><small class="engine-help">Consulte a tabela da sua corretora; zero só se não houver comissão.</small></label>
+          <label>Swap BUY (por lote e virada de data UTC)<input name="swap_long_per_lot_per_utc_rollover" type="number" min="-10000" max="10000" step="0.01" value="0" required><small class="engine-help">Valor assinado; a rolagem UTC aproxima o horário do broker.</small></label>
+          <label>Swap SELL (por lote e virada de data UTC)<input name="swap_short_per_lot_per_utc_rollover" type="number" min="-10000" max="10000" step="0.01" value="0" required><small class="engine-help">Não modela a rolagem tripla nem feriados do broker.</small></label>
+          <label class="replay-cost-confirm"><input name="costs_confirmed" type="checkbox" required> Confirmei os custos acima na configuração da conta demo.</label>
+          <div class="engine-actions"><button class="button primary" id="replay-run" type="submit" disabled>Executar replay somente leitura</button><button class="button secondary" id="replay-refresh" type="button">Atualizar ativos</button></div>
+        </form>
+        <button type="button" class="button secondary" id="replay-saved">Reproduzir último histórico salvo (offline)</button>
+        <div id="replay-status" class="engine-detail" role="status">Aguardando conexão com o MT5 e seleção de ativo.</div>
+        <div id="replay-report" class="replay-report hidden"></div>
+      </section>
       <section class="panel engine-panel">
         <div class="section-heading"><div class="heading-title"><span class="section-icon cyan"><svg class="icon"><use href="#icon-activity"/></svg></span><div><h2>Execução por estratégias cadastradas</h2><p>Modo separado do novo Analista de mercado</p></div></div><span id="engine-status" class="status-chip">PARADO</span></div>
         <p class="engine-disclaimer">Cada regra é uma adaptação operacional e não comprova rentabilidade. DEMO e REAL podem enviar ordens após aprovação da estratégia, limites configurados e confirmação específica em cada início. Arquivos importados nunca são executados como código.</p>
+        <p id="strategy-risk-summary" class="engine-help"></p><button type="button" class="button secondary" data-view="settings">Configurar lote e risco</button>
         <form id="engine-form" class="engine-form">
           <label>Estratégia<select name="strategy_id" id="engine-strategy" required><option value="">Carregando estratégias…</option></select><small id="engine-compat-note" class="engine-help">Aprovação no catálogo não significa compatibilidade com o motor.</small><small id="engine-rule-note" class="engine-help"></small></label>
           <label id="engine-symbol-label">Ativo(s) MT5<input name="symbol" maxlength="180" value="EURUSD" required placeholder="Ex.: EURUSD,GBPUSD,USDJPY"></label>
@@ -139,10 +170,8 @@
           <label class="orb-only">Fim das entradas<input name="trade_end" type="time" value="11:00"></label>
           <label id="engine-lookback-label">Lookback (barras D1)<input name="lookback_days" type="number" min="2" max="252" value="20"></label>
           <label id="engine-gap-label">Gap mínimo (ATR)<input name="gap_atr_multiple" type="number" min="0.5" max="5" step="0.1" value="1.5"></label>
-          <label>Risco máximo por trade (%)<input name="risk_per_trade_pct" type="number" min="0.01" max="0.25" step="0.01" value="0.25" required></label>
-          <label>Parada diária (%)<input name="daily_loss_limit_pct" type="number" min="0.1" max="1" step="0.1" value="1" required></label>
           <label>Alvo em múltiplos de risco<input name="reward_risk" type="number" min="0.5" max="3" step="0.1" value="1.5" required></label>
-          <div class="engine-limits"><strong>Tetos fixos de segurança</strong><span>máximo 0,01 lote · uma tentativa por sessão (M1 na ORB/gap; por candle D1 nas regras diárias) · nenhuma posição prévia. A perda estimada exclui comissão, spread futuro, slippage e gaps; a perda real pode ultrapassar os limites percentuais.</span></div>
+          <div class="engine-limits"><strong>Limites operacionais</strong><span>Lote e risco definidos em Configurações · uma tentativa por sessão (M1 na ORB/gap; por candle D1 nas regras diárias) · nenhuma posição prévia. A perda estimada exclui comissão, spread futuro, slippage e gaps; a perda real pode ultrapassar os limites percentuais.</span></div>
           <div class="engine-actions"><button class="button secondary" type="submit">Salvar configuração</button><button class="button secondary" id="engine-observe" type="button">Iniciar observação</button><button class="button primary" id="engine-demo" type="button">Iniciar execução DEMO</button><button class="button danger" id="engine-real" type="button">Iniciar execução REAL</button><button class="button danger" id="engine-stop" type="button">Parar motor</button></div>
         </form>
         <div id="engine-detail" class="engine-detail">Motor parado após reinício; a execução nunca reinicia automaticamente.</div>
@@ -152,10 +181,39 @@
     </section>
 
     <section class="view" id="view-settings">
-      <div class="page-intro"><div><span class="eyebrow">APLICATIVO</span><h1>Configurações</h1><p>Conectores externos são opcionais e não podem substituir a revisão humana.</p></div></div>
+      <div class="page-intro"><div><span class="eyebrow">OPERAÇÃO</span><h1>Configurações</h1><p>Defina o tamanho das ordens, orçamento de perda e reserva de margem.</p></div></div>
+      <section class="panel settings-panel"><h2>Conexão e relógio do MT5</h2><p id="clock-bridge-health" role="status">Consultando publicação do relógio…</p><p class="engine-help">ScalperLabClockService publica a cada 10 segundos, independentemente do calendário. Para a primeira ativação: MT5 → Navegador → Serviços → ScalperLabClockService. O serviço não envia ordens.</p></section>
+      <section class="panel settings-panel risk-settings-panel">
+        <div class="section-heading"><div class="heading-title"><span class="section-icon cyan"><svg class="icon"><use href="#icon-shield"/></svg></span><div><h2>Lote e risco</h2><p>Perfis por motor · limite diário compartilhado pela conta</p></div></div><span id="risk-version" class="count-chip">—</span></div>
+        <form id="risk-settings-form" class="risk-config-grid">
+          <label>Perfil do motor<select name="engine"><option value="analyst">Analista de mercado</option><option value="strategy">Estratégias cadastradas</option></select></label>
+          <label>Dimensionamento<select name="sizing_mode"><option value="risk_pct">Automático por risco (%)</option><option value="risk_cash">Automático por valor monetário</option><option value="fixed_lot">Lote fixo</option></select></label>
+          <label data-risk-field="pct">Risco máximo por operação (%)<input name="risk_per_trade_pct" type="number" min="0.001" max="100" step="any" required><small>No lote fixo, funciona como teto de perda até o stop.</small></label>
+          <label data-risk-field="cash">Risco por operação (moeda da conta)<input name="risk_cash" type="number" min="0.01" max="1000000000000" step="any" required><small id="risk-currency">Conecte o MT5 para identificar a moeda.</small></label>
+          <label data-risk-field="fixed">Lote fixo<input name="fixed_volume" type="number" min="0.00000001" max="100000000" step="any" required><small>Quantidade exata. Contrato, risco e margem podem recusar a entrada.</small></label>
+          <label>Lote máximo por ordem<input name="max_volume" type="number" min="0.00000001" max="100000000" step="any" required><small>Teto comum aos ativos do perfil; respeita mínimo e passo de cada contrato.</small></label>
+          <label>Reserva da margem livre (%)<input name="margin_reserve_pct" type="number" min="0" max="99.99" step="any" required><small>Parte da margem livre atual que a nova ordem deve preservar.</small></label>
+          <label>Perda diária máxima da conta (%)<input name="daily_loss_limit_pct" type="number" min="0.001" max="100" step="any" required><small>Vale para ambos os motores. Salvar ou reiniciar não apaga o consumo.</small></label>
+          <div class="risk-config-actions"><button type="submit" class="button primary" id="risk-settings-save">Salvar lote e risco</button><span id="risk-settings-status" role="status"></span></div>
+        </form>
+        <div id="risk-daily-status" class="engine-detail" role="status"></div>
+        <p class="engine-help">O risco estima a perda entre entrada e stop. Margem é a garantia exigida pela corretora. Custos e execução podem elevar a perda realizada. O limite diário pausa novas entradas; posições abertas permanecem no MT5.</p>
+      </section>
+      <section class="panel settings-panel risk-settings-panel">
+        <div class="section-heading"><div><h2>Prévia de lote e margem</h2><p class="engine-help">Usa o perfil salvo acima, cotação atual e o preço de stop informado. Nenhuma ordem é enviada.</p></div></div>
+        <form id="risk-preview-form" class="risk-config-grid">
+          <label>Ativo do MT5<select name="symbol" id="risk-preview-symbol"><option value="">Carregando Market Watch…</option></select><small id="risk-symbol-contract"></small></label>
+          <label>Direção<select name="side"><option value="BUY">Compra</option><option value="SELL">Venda</option></select></label>
+          <label>Preço do stop<input name="stop" type="number" min="0.00000001" step="any" placeholder="Preço válido para o ativo" required></label>
+          <div class="risk-config-actions"><button class="button secondary" type="submit" id="risk-preview-button">Calcular prévia</button><small>O envio recalcula preço, orçamento e margem.</small></div>
+        </form>
+        <div id="risk-preview-result" class="engine-detail" role="status">Informe o ativo e o stop para calcular.</div>
+      </section>
+      <details class="panel settings-panel settings-support"><summary>Integrações de pesquisa e informações do aplicativo</summary>
       <section class="panel settings-panel"><h2>Disponibilidade das fontes</h2><div id="settings-providers" class="provider-grid"></div><div class="setting-note"><strong>Chaves opcionais</strong><p>Configure <code>SCALPERLAB_BRAVE_API_KEY</code>, <code>SCALPERLAB_YOUTUBE_API_KEY</code> e <code>OPENAI_API_KEY</code> como variáveis de ambiente do Windows e reinicie o aplicativo. Não cole chaves nesta interface.</p></div></section>
       <section class="panel settings-panel"><h2>Direitos e procedência</h2><p>ScalperLab guarda metadados, URLs e trechos curtos para revisão local. A coleta segue os métodos públicos configurados pelo usuário; respeite os termos, quotas e direitos de cada fonte. O conteúdo não é republicado automaticamente.</p></section>
       <section class="panel settings-panel"><h2>Sobre a validação de código</h2><p>Arquivos Python são analisados em subprocesso isolado para sintaxe e importações sensíveis. MQL5 recebe verificações estruturais estáticas. O aplicativo não executa, não compila e não declara seguro o código importado.</p></section>
+      </details>
     </section>
   </main>
 </div>

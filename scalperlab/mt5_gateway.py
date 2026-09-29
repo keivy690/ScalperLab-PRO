@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from .position_sizing import size_order, valid_volume
+from .risk_settings import validate_policy
+import math
+
 import importlib
 import re
 import threading
@@ -7,7 +11,9 @@ import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from .mt5_calendar_bridge import calendar_context_for_symbol, read_calendar_export
+from .bar_time import normalize_bar_times
+
+from .mt5_calendar_bridge import calendar_context_for_symbol, read_calendar_export, read_clock_export
 from .mt5_time import (MAX_FUTURE_TIME_SKEW_SECONDS, MT5_MAX_CLOSED_BAR_AGE_SECONDS,
                        MT5TimeError, normalize_tick_time)
 
@@ -171,6 +177,29 @@ class MT5Gateway:
     def market_watch_symbols(self):
         """Return only symbols currently visible in this terminal's Market Watch."""
         return [symbol for symbol in self.available_symbols() if symbol.visible]
+
+    def market_watch_catalog(self) -> dict[str, Any]:
+        """Return a UI-ready Market Watch catalog while preserving MT5 failure details."""
+        from .trading.models import Symbol
+
+        mt5 = self._connect()
+        if mt5 is None:
+            return {"available": False, "source": "MT5 Market Watch", "count": 0,
+                    "items": [], "detail": self.last_error or "Conector MT5 indisponível."}
+        try:
+            rows = mt5.symbols_get()
+        except Exception as exc:
+            return {"available": False, "source": "MT5 Market Watch", "count": 0,
+                    "items": [], "detail": f"Falha ao consultar símbolos do MT5 ({type(exc).__name__})."}
+        if rows is None:
+            return {"available": False, "source": "MT5 Market Watch", "count": 0,
+                    "items": [], "detail": f"O MT5 não retornou o catálogo ({mt5.last_error()})."}
+        reverse = {broker: canonical for canonical, broker in self.symbol_mappings.items()}
+        items = [Symbol.from_broker_info(row, reverse.get(str(getattr(row, "name", ""))))
+                 for row in rows if getattr(row, "name", None) and getattr(row, "visible", False)]
+        items.sort(key=lambda item: item.broker_symbol.casefold())
+        return {"available": True, "source": "MT5 Market Watch", "count": len(items),
+                "items": [item.to_dict() for item in items], "detail": None}
 
     def terminal_state(self) -> dict[str, Any]:
         state = self.state()
@@ -363,6 +392,9 @@ class MT5Gateway:
                 self._engine_armed_mode = self._engine_armed_fingerprint = None
             return {
                 "connected": bool(terminal and terminal.connected), "status": "conectado" if terminal and terminal.connected else "desconectado",
+                "clock_bridge": read_clock_export(
+                    getattr(terminal, "commondata_path", None), login=str(account.login),
+                    server=str(account.server), terminal_data_path=getattr(terminal, "data_path", None)),
                 "detail": None if terminal and terminal.connected else "O terminal está inicializado, mas não conectado ao servidor.",
                 "account": {"login": str(account.login), "server": str(account.server), "company": str(account.company),
                             "currency": str(account.currency), "balance": float(account.balance),
@@ -467,7 +499,7 @@ class MT5Gateway:
 
     @_terminal_serialized
     def strategy_market_data(self, symbol_name: str, count: int = 2400,
-                             timeframe: str = "M1") -> dict[str, Any]:
+                             timeframe: str = "M1", *, require_fresh: bool = True) -> dict[str, Any]:
         """Read closed bars and broker symbol contract details; never sends an order."""
         timeframe = str(timeframe).upper()
         symbol_name = self.resolve_broker_symbol(symbol_name)
@@ -499,16 +531,20 @@ class MT5Gateway:
                      "spread": int(rate_value(row, "spread")),
                      "real_volume": int(rate_value(row, "real_volume"))}
                     for row in rates]
-            tick = mt5.symbol_info_tick(symbol_name)
-            if tick is None:
-                return {"ok": False,
-                        "detail": "Tick atual indisponível; não foi possível validar o fuso do histórico."}
-            normalized_tick = normalize_tick_time(
-                getattr(tick, "time", 0), getattr(tick, "time_msc", None))
-            offset = normalized_tick.server_utc_offset_seconds
-            for bar in bars:
-                bar["time"] -= offset
-            bars.sort(key=lambda item: item["time"])
+            tick = self.current_tick(symbol_name)
+            if not tick.get("ok"):
+                return tick
+            tick_time = tick["time_normalization"]
+            offset = tick_time["server_utc_offset_seconds"]
+            # The forming M1 bar identifies the rate stream's encoding separately
+            # from tick normalization. Never infer it from an old closed candle.
+            forming = mt5.copy_rates_from_pos(symbol_name, mt5.TIMEFRAME_M1, 0, 1)
+            if forming is None or len(forming) != 1:
+                return {"ok": False, "code": "bar_time_unverified",
+                        "detail": "Barra M1 em formação indisponível para validar o horário do histórico."}
+            bars, bar_time = normalize_bar_times(
+                bars, m1_open=int(rate_value(forming[0], "time")), tick_utc=tick["time"],
+                server_offset=offset, timeframe=timeframe, allow_recent_tail=require_fresh)
             now_epoch = time.time()
             latest_bar_age = now_epoch - bars[-1]["time"] if bars else None
             max_closed_bar_age = MT5_MAX_CLOSED_BAR_AGE_SECONDS.get(timeframe)
@@ -517,16 +553,18 @@ class MT5Gateway:
                         "detail": "Histórico MT5 permanece no futuro após a normalização UTC."}
             if max_closed_bar_age is None:
                 return {"ok": False, "detail": f"Timeframe MT5 sem regra de frescor: {timeframe}."}
-            if latest_bar_age is None or latest_bar_age > max_closed_bar_age:
+            if require_fresh and (latest_bar_age is None or latest_bar_age > max_closed_bar_age):
                 return {"ok": False,
                         "detail": "Último candle fechado desatualizado; análise bloqueada."}
             return {"ok": True, "symbol": symbol.name, "bars": bars,
                     "time_normalization": {
-                        "basis": "UTC", "source": "live_mt5_tick_vs_system_utc",
+                        "basis": "UTC",
+                        "source": "rates_m1_evidence; tick_mql5_clock_snapshot",
+                        **bar_time,
                         "server_utc_offset_seconds": offset,
-                        "tick_age_seconds": round(normalized_tick.age_seconds, 3),
-                        "calibration_residual_seconds": round(
-                            normalized_tick.calibration_residual_seconds, 3),
+                        "tick_age_seconds": tick_time["age_seconds"],
+                        "calibration_residual_seconds": tick_time["calibration_residual_seconds"],
+                        "clock_reference": tick_time["clock_reference"],
                         "last_closed_bar_age_seconds": round(latest_bar_age, 3),
                     },
                     "contract": {"digits": int(symbol.digits), "point": float(symbol.point),
@@ -542,6 +580,8 @@ class MT5Gateway:
                                  "swap_long": float(getattr(symbol, "swap_long", 0.0)),
                                  "swap_short": float(getattr(symbol, "swap_short", 0.0)),
                                  "swap_mode": int(getattr(symbol, "swap_mode", 0)),
+                                 "chart_mode": int(getattr(symbol, "chart_mode", 0)),
+                                 "swap_rollover3days": int(getattr(symbol, "swap_rollover3days", 0)),
                                  "trade_mode": int(symbol.trade_mode),
                                  "volume_min": float(symbol.volume_min),
                                  "volume_max": float(symbol.volume_max),
@@ -550,9 +590,14 @@ class MT5Gateway:
                                  "filling_mode": int(symbol.filling_mode),
                                  "trade_exemode": int(symbol.trade_exemode)}}
         except MT5TimeError as exc:
-            return {"ok": False, "detail": str(exc)}
+            return {"ok": False, "detail": str(exc), "code": exc.code}
         except Exception as exc:
             return {"ok": False, "detail": f"Falha ao consultar barras/contrato ({type(exc).__name__})."}
+
+    def historical_market_data(self, symbol_name: str, count: int = 1200,
+                               timeframe: str = "M15") -> dict[str, Any]:
+        """Read closed historical bars for offline replay; this method never sends orders."""
+        return self.strategy_market_data(symbol_name, count, timeframe, require_fresh=False)
 
     @_terminal_serialized
     def current_tick(self, symbol_name: str) -> dict[str, Any]:
@@ -560,52 +605,68 @@ class MT5Gateway:
         mt5 = self._connect()
         if mt5 is None:
             return {"ok": False, "detail": self.last_error or "MT5 indisponível."}
+        diagnostics = {"symbol": symbol_name, "source": "mql5_clock_snapshot"}
         try:
+            terminal = mt5.terminal_info()
+            account = mt5.account_info()
+            if not terminal or not account or not getattr(terminal, "connected", False):
+                return {"ok": False, "detail": "Terminal/conta MT5 indisponível.",
+                        "code": "clock_unavailable", "time_normalization": diagnostics}
+            reference = read_clock_export(
+                getattr(terminal, "commondata_path", None),
+                login=str(account.login), server=str(account.server),
+                terminal_data_path=getattr(terminal, "data_path", None))
+            diagnostics["clock_reference"] = reference
+            if not reference["ok"]:
+                return {"ok": False, "detail": reference["detail"],
+                        "code": reference["code"], "severity": reference["severity"],
+                        "time_normalization": diagnostics}
             tick = mt5.symbol_info_tick(symbol_name)
             if tick is None or not float(tick.bid) > 0 or not float(tick.ask) > 0:
                 return {"ok": False, "detail": "Sem cotação válida para o símbolo."}
-            normalized = normalize_tick_time(getattr(tick, "time", 0),
-                                             getattr(tick, "time_msc", None))
+            diagnostics.update(raw_time=getattr(tick, "time", 0),
+                               raw_time_msc=getattr(tick, "time_msc", None),
+                               server_utc_offset_seconds=reference["server_utc_offset_seconds"])
+            after = mt5.account_info()
+            after_terminal = mt5.terminal_info()
+            if (not after or not after_terminal
+                    or not getattr(after_terminal, "connected", False)
+                    or (account.login, account.server) != (after.login, after.server)
+                    or getattr(terminal, "data_path", None) != getattr(after_terminal, "data_path", None)):
+                return {"ok": False, "code": "clock_identity", "severity": "hard",
+                        "detail": "Conta ou terminal mudou durante a leitura do relógio.",
+                        "time_normalization": diagnostics}
+            normalized = normalize_tick_time(
+                getattr(tick, "time", 0), getattr(tick, "time_msc", None),
+                server_utc_offset_seconds=reference["server_utc_offset_seconds"])
             return {"ok": True, "bid": float(tick.bid), "ask": float(tick.ask),
                     "time": normalized.utc_time, "time_msc": normalized.utc_time_msc,
                     "time_normalization": {
-                        "basis": "UTC", "source": "live_mt5_tick_vs_system_utc",
+                        **diagnostics, "basis": "UTC", "source": "mql5_clock_snapshot",
                         "server_utc_offset_seconds": normalized.server_utc_offset_seconds,
                         "age_seconds": round(normalized.age_seconds, 3),
                         "calibration_residual_seconds": round(
                             normalized.calibration_residual_seconds, 3),
                     }}
         except MT5TimeError as exc:
-            return {"ok": False, "detail": str(exc)}
+            return {"ok": False, "detail": str(exc), "code": exc.code,
+                    "time_normalization": {**diagnostics, **exc.diagnostics}}
         except Exception as exc:
             return {"ok": False, "detail": f"Falha ao ler cotação ({type(exc).__name__})."}
 
     @_terminal_serialized
     def risk_volume(self, symbol_name: str, side: str, entry: float, stop: float,
-                    risk_cash: float, hard_cap: float = 0.01) -> dict[str, Any]:
+                    risk_cash: float, hard_cap: float = 0.01, *, policy: dict | None = None) -> dict[str, Any]:
         symbol_name = self.resolve_broker_symbol(symbol_name)
         mt5 = self._connect()
         if mt5 is None:
             return {"ok": False, "detail": self.last_error or "MT5 indisponível."}
         try:
             symbol = mt5.symbol_info(symbol_name)
-            if symbol is None or risk_cash <= 0:
-                return {"ok": False, "detail": "Contrato do símbolo ou limite monetário indisponível."}
-            order_type = mt5.ORDER_TYPE_BUY if side == "BUY" else mt5.ORDER_TYPE_SELL
-            one_lot = mt5.order_calc_profit(order_type, symbol_name, 1.0, entry, stop)
-            if one_lot is None or not float(one_lot) < 0:
-                return {"ok": False, "detail": "Não foi possível calcular a perda potencial até o stop."}
-            step = float(symbol.volume_step)
-            maximum = min(float(symbol.volume_max), float(hard_cap))
-            raw = min(maximum, risk_cash / abs(float(one_lot)))
-            volume = int((raw + 1e-12) / step) * step if step > 0 else 0.0
-            volume = round(volume, 8)
-            if volume < float(symbol.volume_min):
-                return {"ok": False, "detail": "O menor lote do símbolo excede o risco por operação configurado; ordem bloqueada."}
-            loss = abs(float(mt5.order_calc_profit(order_type, symbol_name, volume, entry, stop) or 0.0))
-            if loss > risk_cash * 1.000001:
-                return {"ok": False, "detail": "O lote arredondado excederia o risco máximo; ordem bloqueada."}
-            return {"ok": True, "volume": volume, "estimated_loss": loss}
+            if symbol is None:
+                return {"ok": False, "detail": "Contrato do ativo indisponível."}
+            return size_order(mt5, symbol, side, float(entry), float(stop), float(risk_cash),
+                              policy or {"max_volume": hard_cap})
         except Exception as exc:
             return {"ok": False, "detail": f"Falha ao dimensionar posição ({type(exc).__name__})."}
 
@@ -613,22 +674,22 @@ class MT5Gateway:
                                  stop: float, target: float, strategy_id: int,
                                  expected_account_fingerprint: str | None = None,
                                  risk_cash: float | None = None,
-                                 correlation_id: str | None = None) -> dict[str, Any]:
+                                 correlation_id: str | None = None, risk_policy: dict | None = None) -> dict[str, Any]:
         """Single demo-only market request. Ambiguous results are never retried."""
         with self._trade_lock, self._lock:
             return self._send_account_order(
                 symbol_name, side, volume, stop, target, strategy_id, expected_account_fingerprint,
-                "strategy", risk_cash=risk_cash, correlation_id=correlation_id)
+                "strategy", risk_cash=risk_cash, correlation_id=correlation_id, risk_policy=risk_policy)
 
     def send_real_strategy_order(self, symbol_name: str, side: str, volume: float,
                                  stop: float, target: float, strategy_id: int,
                                  expected_account_fingerprint: str | None = None,
                                  risk_cash: float | None = None,
-                                 correlation_id: str | None = None) -> dict[str, Any]:
+                                 correlation_id: str | None = None, risk_policy: dict | None = None) -> dict[str, Any]:
         with self._trade_lock, self._lock:
             return self._send_account_order(symbol_name, side, volume, stop, target,
                 strategy_id, expected_account_fingerprint, "strategy", risk_cash=risk_cash,
-                mode="REAL", correlation_id=correlation_id)
+                mode="REAL", correlation_id=correlation_id, risk_policy=risk_policy)
 
     def send_demo_analyst_order(self, symbol_name: str, side: str, volume: float,
                                 stop: float, target: float,
@@ -636,13 +697,13 @@ class MT5Gateway:
                                 risk_cash: float | None = None,
                                 max_spread: float | None = None,
                                 min_reward_risk: float | None = None,
-                                correlation_id: str | None = None) -> dict[str, Any]:
+                                correlation_id: str | None = None, risk_policy: dict | None = None) -> dict[str, Any]:
         """Independent DEMO-only order path for the market analyst; never retries ambiguous sends."""
         with self._trade_lock, self._lock:
             return self._send_account_order(
                 symbol_name, side, volume, stop, target, 998, expected_account_fingerprint, "analyst",
                 risk_cash=risk_cash, max_spread=max_spread, min_reward_risk=min_reward_risk,
-                correlation_id=correlation_id)
+                correlation_id=correlation_id, risk_policy=risk_policy)
 
     def send_real_analyst_order(self, symbol_name: str, side: str, volume: float,
                                 stop: float, target: float,
@@ -650,12 +711,12 @@ class MT5Gateway:
                                 risk_cash: float | None = None,
                                 max_spread: float | None = None,
                                 min_reward_risk: float | None = None,
-                                correlation_id: str | None = None) -> dict[str, Any]:
+                                correlation_id: str | None = None, risk_policy: dict | None = None) -> dict[str, Any]:
         with self._trade_lock, self._lock:
             return self._send_account_order(symbol_name, side, volume, stop, target, 998,
                 expected_account_fingerprint, "analyst", risk_cash=risk_cash,
                 max_spread=max_spread, min_reward_risk=min_reward_risk, mode="REAL",
-                correlation_id=correlation_id)
+                correlation_id=correlation_id, risk_policy=risk_policy)
 
     def _send_account_order(self, symbol_name: str, side: str, volume: float,
                                   stop: float, target: float, strategy_id: int,
@@ -664,7 +725,7 @@ class MT5Gateway:
                                   max_spread: float | None = None,
                                   min_reward_risk: float | None = None,
                                   mode: str = "DEMO",
-                                  correlation_id: str | None = None) -> dict[str, Any]:
+                                  correlation_id: str | None = None, risk_policy: dict | None = None) -> dict[str, Any]:
         symbol_name = self.resolve_broker_symbol(symbol_name)
         armed = self.analyst_engine_armed if engine == "analyst" else self.strategy_engine_armed
         if not armed or self._engine_armed_mode != mode:
@@ -693,8 +754,13 @@ class MT5Gateway:
                 return {"ok": False, "detail": "O símbolo não aceita negociação nos dois sentidos."}
             if max_spread is not None and float(tick.ask) - float(tick.bid) > max_spread:
                 return {"ok": False, "detail": "Spread se alargou antes do envio; sinal descartado."}
-            if not (float(symbol.volume_min) <= volume <= min(float(symbol.volume_max), 0.01)):
-                return {"ok": False, "detail": "Volume fora do limite de segurança do motor (máximo 0,01 lote)."}
+            policy = validate_policy(risk_policy or {})
+            if risk_policy is not None and (risk_cash is None or not math.isfinite(float(risk_cash)) or risk_cash <= 0):
+                return {"ok": False, "detail": "Orçamento de risco inválido."}
+            if (not valid_volume(float(volume), symbol) or volume > policy["max_volume"]
+                    or (policy["sizing_mode"] == "fixed_lot" and abs(volume - policy["fixed_volume"]) > 1e-9)
+                    or (float(getattr(symbol, "volume_limit", 0) or 0) > 0 and volume > symbol.volume_limit)):
+                return {"ok": False, "detail": "Volume incompatível com o contrato ou o perfil de lote e risco."}
             positions = mt5.positions_get()
             if positions is None:
                 return {"ok": False, "detail": "Não foi possível reconciliar posições abertas; envio cancelado."}
@@ -719,14 +785,15 @@ class MT5Gateway:
             if risk_cash is not None:
                 calc_type = mt5.ORDER_TYPE_BUY if is_buy else mt5.ORDER_TYPE_SELL
                 loss = mt5.order_calc_profit(calc_type, symbol_name, float(volume), price, stop)
-                if loss is None or float(loss) >= 0 or abs(float(loss)) > risk_cash * 1.000001:
+                if loss is None or not math.isfinite(float(loss)) or float(loss) >= 0 or abs(float(loss)) > risk_cash * 1.000001:
                     return {"ok": False, "detail": "Preço atual excederia o teto de risco calculado; ordem cancelada."}
             account_info = mt5.account_info()
             margin = mt5.order_calc_margin(mt5.ORDER_TYPE_BUY if is_buy else mt5.ORDER_TYPE_SELL,
                                            symbol_name, float(volume), price)
-            if (account_info is None or margin is None or float(margin) < 0
-                    or float(margin) > float(getattr(account_info, "margin_free", 0.0)) * 0.80):
-                return {"ok": False, "detail": "Margem insuficiente ou não calculável com folga operacional de 20%; ordem cancelada."}
+            if (account_info is None or margin is None or not math.isfinite(float(margin)) or float(margin) < 0
+                    or not math.isfinite(float(getattr(account_info, "margin_free", 0.0)))
+                    or float(margin) > float(getattr(account_info, "margin_free", 0.0)) * (1 - policy["margin_reserve_pct"] / 100)):
+                return {"ok": False, "detail": "Margem insuficiente ou não calculável com a reserva configurada; ordem cancelada."}
             magic = 209222050 if engine == "analyst" else 209221050 + int(strategy_id % 1000)
             comment = "SL1 ANALYST" if engine == "analyst" else f"SL1 S{strategy_id}"[:31]
             request = {"action": mt5.TRADE_ACTION_DEAL, "symbol": symbol_name, "volume": float(volume),
@@ -795,6 +862,7 @@ class MT5Gateway:
                     "ticket": int(position.ticket), "order": int(getattr(result, "order", 0)),
                     "deal": int(getattr(result, "deal", 0)), "volume": float(position.volume),
                     "price": float(position.price_open), "sl": float(position.sl), "tp": float(position.tp),
+                    "reconciled": True,
                     "detail": f"Ordem {mode} confirmada com stop e alvo reconciliados no MT5."}
         except Exception as exc:
             return {"ok": False, "unknown": True, "detail": f"Falha durante envio/reconciliação ({type(exc).__name__}); não reenvie até conferir o terminal."}

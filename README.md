@@ -19,6 +19,8 @@ Use Python 3.12 (MetaTrader5's native package may not support the newest Python 
 
 For normal use, double-click `Iniciar-ScalperLab.bat` in the project folder. It reuses `.venv`, creates it with Python 3.12 if needed, checks pinned dependencies from `requirements.lock`, warns if the MT5 terminal is not open, and launches the desktop interface. Search keys remain optional and are not requested or stored by the launcher.
 
+For a Windows pilot package, install the development dependencies and run `powershell -ExecutionPolicy Bypass -File .\build-windows-pilot.ps1`. The script creates a PyInstaller `onedir` bundle under `dist\ScalperLab` and a ZIP for transfer. The Python MT5 connector and its native API are bundled with the app; the read-only MQL5 calendar service and an assisted terminal installer are included as separate files. This is a test package, not a signed installer; see `docs/BUILD_WINDOWS_PILOT.md` for prerequisites and validation steps.
+
 ```powershell
 py -3.12 -m venv .venv
 .\.venv\Scripts\python -m pip install -r requirements.lock
@@ -36,7 +38,7 @@ Developer verification uses the separate test dependencies:
 
 Optional provider variables: `SCALPERLAB_BRAVE_API_KEY`, `SCALPERLAB_YOUTUBE_API_KEY`, `OPENAI_API_KEY`, and `SCALPERLAB_AI_MODEL`.
 
-The database and imported strategy text are stored under `%LOCALAPPDATA%\ScalperLab\`, outside this project directory.
+The database and imported strategy text are stored under `%USERPROFILE%\ScalperLabData\`, outside this project directory.
 
 ## Project map
 

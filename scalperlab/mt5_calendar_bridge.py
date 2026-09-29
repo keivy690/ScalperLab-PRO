@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import math
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +11,93 @@ BRIDGE_FILE = "ScalperLab_calendar_v1.json"
 MAX_BRIDGE_BYTES = 4_000_000
 MAX_AGE_SECONDS = 300
 MAX_EVENTS = 2_000
+CLOCK_FILE = "ScalperLab_clock_v2.json"
+CLOCK_MAX_AGE_SECONDS = 45
+
+
+def read_clock_export(commondata_path: str | Path | None, *, login: str,
+                      server: str, terminal_data_path: str | None = None,
+                      now: float | None = None) -> dict[str, Any]:
+    """Read clock evidence independently of calendar event availability.
+
+    Legacy schema 1 identifies the account/server, not a unique terminal.
+    When a publisher includes terminal_data_path it must match too. The gateway
+    additionally corroborates this reference with its own live terminal tick.
+    """
+    unavailable = {"ok": False, "source": "mql5_clock_snapshot",
+                   "code": "clock_unavailable", "severity": "transient"}
+
+    def fail(detail, code="clock_invalid", severity="hard"):
+        return {**unavailable, "detail": detail, "code": code, "severity": severity}
+
+    if not commondata_path or not login or not server:
+        return fail("Identidade ou diretório comum do MT5 indisponível.",
+                    "clock_unavailable", "transient")
+    try:
+        terminal_root = Path(terminal_data_path).resolve() if terminal_data_path else None
+        dedicated = bool(terminal_root and (
+            (terminal_root / "MQL5" / "Files" / CLOCK_FILE).exists() or
+            (terminal_root / "MQL5" / "Services" / "ScalperLabClockService.ex5").exists()))
+        root = ((terminal_root / "MQL5" / "Files") if dedicated else
+                (Path(commondata_path) / "Files")).resolve()
+        path = (root / (CLOCK_FILE if dedicated else BRIDGE_FILE)).resolve()
+        if not path.is_relative_to(root):
+            return fail("Caminho da ponte MQL5 inválido.")
+        with path.open("rb") as stream:
+            data = stream.read(MAX_BRIDGE_BYTES + 1)
+        if len(data) > MAX_BRIDGE_BYTES:
+            return fail("Snapshot do relógio MQL5 excede o limite permitido.")
+        payload = json.loads(data.decode("utf-8-sig"))
+        if not isinstance(payload, dict) or payload.get("schema") != (2 if dedicated else 1):
+            return fail("Estrutura do relógio MQL5 incompatível.")
+        if dedicated and (payload.get("provider") != "ScalperLabClockService" or
+                          payload.get("version") != "2.00" or not payload.get("terminal_data_path")):
+            return fail("Identidade ou versão do ScalperLabClockService incompatível.")
+        if dedicated and payload.get("connected") is not True:
+            return fail("ScalperLabClockService ativo; terminal sem conexão com a corretora.",
+                        "clock_disconnected", "transient")
+        if (str(payload.get("account_login", "")) != str(login)
+                or payload.get("account_server") != server):
+            return fail("Relógio MQL5 pertence a outra conta/servidor.", "clock_identity")
+        published_path = payload.get("terminal_data_path")
+        if published_path and (not terminal_data_path or
+                Path(published_path).resolve() != Path(terminal_data_path).resolve()):
+            return fail("Relógio MQL5 pertence a outro terminal.", "clock_identity")
+        captured = payload.get("captured_at_epoch")
+        offset = payload.get("server_utc_offset_seconds")
+        if (isinstance(captured, bool) or not isinstance(captured, (int, float))
+                or not math.isfinite(captured) or captured <= 0):
+            return fail("Data de captura do relógio MQL5 inválida.")
+        current = time.time() if now is None else now
+        age = current - captured
+        if not math.isfinite(age) or age < -5:
+            return fail("Snapshot do relógio MQL5 está no futuro.")
+        if age > (CLOCK_MAX_AGE_SECONDS if dedicated else MAX_AGE_SECONDS):
+            return fail((f"ScalperLabClockService sem atualização há {int(age)} s; inicie o serviço no terminal selecionado."
+                         if dedicated else "Relógio MQL5 legado desatualizado; instale e inicie ScalperLabClockService."),
+                        "clock_stale", "transient")
+        if (isinstance(offset, bool) or not isinstance(offset, int) or abs(offset) > 50400):
+            return fail("Offset do serviço MQL5 inválido; valor não será ajustado.")
+        # Consecutive TimeTradeServer/TimeGMT calls may straddle a second.
+        canonical = round(offset / 900) * 900
+        if abs(offset - canonical) > 5:
+            return fail("Relógios MQL5 divergem da tolerância de cinco segundos.")
+        server_epoch = datetime.strptime(payload["trade_server_time"], "%Y.%m.%d %H:%M:%S").replace(
+            tzinfo=timezone.utc).timestamp()
+        if abs(server_epoch - captured - offset) > 2:
+            return fail("Horário do servidor e offset MQL5 inconsistentes.")
+        return {"ok": True, "source": "mql5_clock_snapshot",
+                "publisher": "ScalperLabClockService" if dedicated else "legacy_calendar",
+                "publisher_version": payload.get("version"),
+                "heartbeat_interval_seconds": 10 if dedicated else 60,
+                "identity_scope": "terminal" if published_path else "account_server",
+                "server_utc_offset_seconds": canonical, "reported_offset_seconds": offset,
+                "captured_at_epoch": captured, "snapshot_age_seconds": round(age, 3)}
+    except (OSError, UnicodeError) as exc:
+        return fail(f"Publicação do relógio indisponível ({type(exc).__name__}); inicie ScalperLabClockService no MT5 selecionado.",
+                    "clock_unavailable", "transient")
+    except (ValueError, TypeError, KeyError, OverflowError):
+        return fail("Não foi possível validar o snapshot do relógio MQL5.")
 
 
 def read_calendar_export(commondata_path: str | Path | None, *, login: str,

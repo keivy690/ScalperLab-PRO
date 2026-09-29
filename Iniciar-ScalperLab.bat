@@ -1,6 +1,14 @@
 @echo off
 setlocal
 chcp 65001 >nul
+
+rem A validação/correção do Windows Time pode exigir privilégios administrativos.
+rem Reabre este inicializador pelo UAC uma única vez antes de iniciar o aplicativo.
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$identity = [Security.Principal.WindowsIdentity]::GetCurrent(); $principal = New-Object -TypeName Security.Principal.WindowsPrincipal -ArgumentList $identity; if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { try { $cmdArgs = '/c ' + [char]34 + [char]34 + '%~f0' + [char]34 + [char]34; Start-Process -FilePath $env:ComSpec -ArgumentList $cmdArgs -Verb RunAs -ErrorAction Stop; exit 100 } catch { exit 1 } }"
+set "ELEVATION_RESULT=%ERRORLEVEL%"
+if "%ELEVATION_RESULT%"=="100" exit /b 0
+if not "%ELEVATION_RESULT%"=="0" goto elevation_failed
+
 cd /d "%~dp0"
 
 set "PYTHON=%~dp0.venv\Scripts\python.exe"
@@ -54,6 +62,11 @@ goto failed
 
 :app_failed
 echo ERRO: O ScalperLab encerrou com falha. Consulte a mensagem acima.
+goto failed
+
+:elevation_failed
+echo ERRO: O ScalperLab precisa de permissao administrativa para validar o horario do Windows.
+echo Aceite a solicitacao do UAC e execute novamente.
 goto failed
 
 :failed

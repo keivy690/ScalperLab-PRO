@@ -26,9 +26,12 @@ ALLOWED_ZONES = {"Europe/London", "America/New_York"}
 class ExecutionEngine:
     """Fail-closed declarative strategy engine for demo execution or observation."""
 
-    def __init__(self, database: Database, gateway: TradingPort) -> None:
+    def __init__(self, database: Database, gateway: TradingPort,
+                 clock_service: Any | None = None, risk_settings=None) -> None:
         self.database = database
         self.gateway = gateway
+        self.clock_service = clock_service
+        self.risk_settings = risk_settings
         saved = database.get_engine_runtime()
         self.config: dict[str, Any] = saved["config"]
         self.state: dict[str, Any] = saved["state"] or {
@@ -47,13 +50,40 @@ class ExecutionEngine:
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
-            return {"config": dict(self.config), "state": dict(self.state),
+            return {"config": {**dict(self.config), **(self.risk_settings.profile("strategy") if self.risk_settings else {})}, "state": dict(self.state),
                     "supported_strategy": ORB_STRATEGY_NAME,
                     "supported_strategies": list(STRATEGY_TYPES),
                     "demo_confirmation_required": ENGINE_CONFIRMATION,
                     "real_confirmation_required": REAL_ENGINE_CONFIRMATION}
 
+    def _clock_failure(self, account_fingerprint: str | None, *, fresh_measurement: bool = False) -> str | None:
+        """Fail closed unless the fresh UTC proof still matches this MT5 account."""
+        if self.clock_service is None:
+            return "Verificação UTC indisponível no motor; nenhuma ordem será enviada."
+        try:
+            terminal_id = getattr(self.gateway, "terminal_id", None)
+            clock_state = self.clock_service.snapshot()
+            if (clock_state.get("status") != "synchronized"
+                    or clock_state.get("mt5_status") != "verified"):
+                return (clock_state.get("detail")
+                        or "Validação UTC expirada ou incompleta; verifique o relógio antes de executar.")
+            verifier = (self.clock_service.is_verified if fresh_measurement
+                        else self.clock_service.is_currently_verified)
+            if not verifier(terminal_id=terminal_id, account_fingerprint=account_fingerprint):
+                return "A validação UTC deixou de ser válida para este terminal/conta; verifique novamente."
+        except Exception:
+            return "Não foi possível revalidar o relógio UTC; nenhuma ordem será enviada."
+        return None
+
+    def _suspend_for_clock(self, reason: str) -> None:
+        detail = (f"Execução suspensa por validação UTC expirada ou inválida: {reason} "
+                  "Nenhuma nova ordem será enviada; confira posições no MT5.")
+        self.stop(detail, phase="bloqueado_relogio")
+
     def configure(self, payload: dict[str, Any], strategies: list[dict[str, Any]]) -> dict[str, Any]:
+        if self.risk_settings:
+            payload = {**payload, **self.risk_settings.profile("strategy"),
+                       "daily_loss_limit_pct": self.risk_settings.snapshot()["daily_loss_limit_pct"]}
         try:
             strategy_id = int(payload.get("strategy_id"))
             raw_symbols = payload.get("symbols", payload.get("symbol", ""))
@@ -101,7 +131,7 @@ class ExecutionEngine:
             return {"ok": False, "detail": "Lookback permitido: 2–252 barras D1; gap: 0,5–5 ATR."}
         if strategy_type == "weekend_gap_reversal" and zone_name != "America/New_York":
             return {"ok": False, "detail": "A regra de reabertura semanal está definida em America/New_York."}
-        if not (0.01 <= risk_pct <= 0.25 and 0.1 <= daily_loss_pct <= 1.0 and 0.5 <= reward_risk <= 3.0):
+        if not (0 < risk_pct <= (100 if self.risk_settings else .25) and 0 < daily_loss_pct <= (100 if self.risk_settings else 1) and 0.5 <= reward_risk <= 3.0):
             return {"ok": False, "detail": "Limites permitidos: risco/operação 0,01–0,25%, perda diária 0,1–1% e alvo 0,5–3R."}
         config = {"strategy_id": strategy_id, "strategy_name": strategy["name"],
                   "strategy_type": strategy_type, "symbol": symbol, "symbols": symbols,
@@ -109,7 +139,7 @@ class ExecutionEngine:
                   "range_minutes": range_minutes, "trade_end": trade_end.strftime("%H:%M"),
                   "risk_per_trade_pct": risk_pct, "daily_loss_limit_pct": daily_loss_pct,
                   "reward_risk": reward_risk, "lookback_days": lookback_days,
-                  "gap_atr_multiple": gap_atr_multiple, "max_volume": 0.01}
+                  "gap_atr_multiple": gap_atr_multiple, "max_volume": self.risk_settings.profile("strategy")["max_volume"] if self.risk_settings else 0.01}
         with self._lock:
             was_running = bool(self.state.get("running"))
             self.state.update(running=False, mode="parado", phase="parado",
@@ -158,6 +188,14 @@ class ExecutionEngine:
                         or not account.get("trade_allowed") or not account.get("trade_expert")):
                     return {"ok": False, "detail": "Ative negociação algorítmica no terminal e na conta antes de iniciar."}
             fingerprint = f"{account.get('login')}@{account.get('server')}"
+            if mode in {"demo", "real"}:
+                clock_failure = self._clock_failure(fingerprint, fresh_measurement=True)
+                if clock_failure:
+                    return {"ok": False, "detail": f"Execução bloqueada: {clock_failure}"}
+            if self.risk_settings and mode in {"demo", "real"}:
+                daily = self.risk_settings.daily_check(self.gateway, account)
+                if not daily["ok"]:
+                    return daily
             if mode in {"demo", "real"} and not self.gateway.arm_order_engine(
                     "strategy", account["mode"], fingerprint):
                 return {"ok": False, "detail": "Outro motor já está armado ou a conta não corresponde; pare-o antes de iniciar."}
@@ -174,9 +212,10 @@ class ExecutionEngine:
             self._persist()
         return {"ok": True, "detail": "Motor iniciado em " + ("OBSERVAÇÃO, sem ordens" if mode == "observacao" else f"{mode.upper()}, envio automático habilitado até parar o motor") + "."}
 
-    def stop(self, reason: str = "Parado manualmente; posições abertas permanecem no MT5 com os stops enviados.") -> dict[str, Any]:
+    def stop(self, reason: str = "Parado manualmente; posições abertas permanecem no MT5 com os stops enviados.",
+             *, phase: str = "parado") -> dict[str, Any]:
         with self._lock:
-            self.state.update(running=False, mode="parado", phase="parado", detail=reason)
+            self.state.update(running=False, mode="parado", phase=phase, detail=reason)
             self.gateway.disarm_order_engine("strategy")
             self._persist()
         self.database.add_log("WARN", f"Motor de estratégias parado: {reason}")
@@ -228,6 +267,11 @@ class ExecutionEngine:
         if expected_mode and account.get("mode") != expected_mode:
             self.stop(f"Conta mudou; execução {mode.upper()} interrompida. Confirme novamente na conta autorizada.")
             return
+        if mode in {"demo", "real"}:
+            clock_failure = self._clock_failure(fingerprint)
+            if clock_failure:
+                self._suspend_for_clock(clock_failure)
+                return
         equity = float(account.get("equity", 0))
         risk_day = datetime.now(ZoneInfo(config["timezone"])).date().isoformat()
         if self.state.get("risk_day") != risk_day:
@@ -237,9 +281,13 @@ class ExecutionEngine:
                 self._persist()
         baseline = float(self.state.get("day_start_equity", equity))
         loss_limit = baseline * config["daily_loss_limit_pct"] / 100.0
-        if baseline - equity >= loss_limit:
+        if not self.risk_settings and baseline - equity >= loss_limit:
             self.stop("Limite diário de perda atingido. Nenhuma nova entrada será enviada; verifique posições abertas no MT5.")
             self.database.add_log("CRITICAL", "Motor parado: limite de perda diária detectado pela variação de equity.")
+            return
+        daily = self.risk_settings.daily_check(self.gateway, account) if self.risk_settings else None
+        if daily and not daily["ok"]:
+            self.stop(daily["detail"])
             return
         strategy_type = config["strategy_type"]
         markets: dict[str, dict[str, Any]] = {}
@@ -356,8 +404,12 @@ class ExecutionEngine:
             return
         digits = contract["digits"]
         stop, target = round(stop, digits), round(target, digits)
-        risk_cash = equity * config["risk_per_trade_pct"] / 100.0
-        sizing = self.gateway.risk_volume(symbol, side, entry, stop, risk_cash, config["max_volume"])
+        policy = self.risk_settings.profile("strategy") if self.risk_settings else None
+        risk_cash = (min(self.risk_settings.budget("strategy", account), daily["remaining_cash"])
+                     if self.risk_settings else equity * config["risk_per_trade_pct"] / 100.0)
+        sizing = self.gateway.risk_volume(symbol, side, entry, stop, risk_cash,
+                                         policy["max_volume"] if policy else config["max_volume"],
+                                         **({"policy": policy} if policy else {}))
         if not sizing.get("ok"):
             self._set_phase("sinal_bloqueado", sizing.get("detail", "Dimensionamento recusado."))
             return
@@ -366,7 +418,7 @@ class ExecutionEngine:
                  "signal_value": signal.get("signal_value"), "rule_detail": signal.get("detail"),
                  "range_high": signal.get("high"), "range_low": signal.get("low"),
                  "entry": entry, "stop": stop, "target": target, "volume": sizing["volume"],
-                 "estimated_loss": sizing["estimated_loss"], "session_key": attempt_key}
+                 "estimated_loss": sizing["estimated_loss"], "sizing": sizing, "session_key": attempt_key}
         with self._lock:
             # Persist the one-shot claim before any external trading request; never blindly retry.
             self.state["last_attempt_key"] = attempt_key
@@ -382,23 +434,34 @@ class ExecutionEngine:
         with self._lock:
             if not self.state.get("running") or self.state.get("mode") != mode:
                 return
+            if mode in {"demo", "real"}:
+                clock_failure = self._clock_failure(self.state.get("account_fingerprint"))
+                if clock_failure:
+                    self._suspend_for_clock(clock_failure)
+                    return
             # Serialize the external order request with stop/reconfigure, so a stop
             # cannot race with an order that has not yet been submitted.
             send_order = (self.gateway.send_real_strategy_order if mode == "real"
                           else self.gateway.send_demo_strategy_order)
             result = send_order(symbol, side, sizing["volume"], stop, target, config["strategy_id"],
                                 expected_account_fingerprint=self.state.get("account_fingerprint"),
-                                risk_cash=risk_cash)
+                                risk_cash=risk_cash, **({"risk_policy": policy} if policy else {}))
             self.state["last_signal"] = {**event, "execution": result}
-            if result.get("unknown"):
+            reconciled = result.get("ok") is True and result.get("reconciled") is True
+            if result.get("unknown") or result.get("position_may_remain") or (result.get("ok") and not reconciled):
+                if result.get("ok") and not reconciled:
+                    result = {**result, "ok": False, "unknown": True,
+                              "no_retry": True, "position_may_remain": True,
+                              "detail": "O MT5 aceitou o pedido, mas ainda não foi possível reconciliar a posição; motor parado e sem repetição automática."}
+                    self.state["last_signal"] = {**event, "execution": result}
                 self.state.update(running=False, mode="parado", phase="resultado_desconhecido",
-                                  detail=result["detail"])
+                                  detail=result.get("detail", "Resultado de ordem desconhecido; confira o MT5 antes de reiniciar."))
                 self.gateway.disarm_order_engine("strategy")
             elif result.get("blocked"):
                 self.state.update(running=False, mode="parado", phase="parado",
                                   detail=result["detail"])
                 self.gateway.disarm_order_engine("strategy")
-            elif result.get("ok"):
+            elif reconciled:
                 self.state.update(phase="ordem_confirmada", detail=result["detail"])
             else:
                 self.state.update(phase="ordem_recusada", detail=result["detail"])

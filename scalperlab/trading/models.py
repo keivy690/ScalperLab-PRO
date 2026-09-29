@@ -23,6 +23,8 @@ class Symbol:
     volume_min: float
     volume_step: float
     trade_enabled: bool
+    volume_max: float = 0.0
+    volume_limit: float = 0.0
     visible: bool = False
     asset_class: str | None = None
     base: str | None = None
@@ -42,6 +44,8 @@ class Symbol:
             volume_min=float(getattr(info, "volume_min", 0.0)),
             volume_step=float(getattr(info, "volume_step", 0.0)),
             trade_enabled=trade_mode in {1, 2, 4},
+            volume_max=float(getattr(info, "volume_max", 0.0)),
+            volume_limit=float(getattr(info, "volume_limit", 0.0)),
             visible=bool(getattr(info, "visible", False)),
             base=getattr(info, "currency_base", None) or None,
             quote=getattr(info, "currency_profit", None) or None,
@@ -56,6 +60,8 @@ class Symbol:
             "volume_min": self.volume_min,
             "volume_step": self.volume_step,
             "trade_enabled": self.trade_enabled,
+            "volume_max": self.volume_max,
+            "volume_limit": self.volume_limit,
             "visible": self.visible,
             "asset_class": self.asset_class,
             "base": self.base,

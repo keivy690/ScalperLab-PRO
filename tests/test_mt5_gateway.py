@@ -342,7 +342,7 @@ class MT5GatewayTests(unittest.TestCase):
         mt5 = FakeMT5()
         mt5.positions = []
         mt5.test_symbol = SimpleNamespace(name="EURUSD#", trade_mode=4, order_mode=127,
-                                          volume_min=0.01, volume_max=100, filling_mode=2,
+                                          volume_min=0.01, volume_max=100, volume_step=0.01, filling_mode=2,
                                           digits=5, trade_exemode=2)
         mt5.symbol_info = lambda _symbol: mt5.test_symbol
         mt5.symbol_info_tick = lambda _symbol: SimpleNamespace(ask=1.082, bid=1.081)
@@ -358,7 +358,7 @@ class MT5GatewayTests(unittest.TestCase):
         mt5 = FakeMT5()
         mt5.positions = []
         mt5.test_symbol = SimpleNamespace(name="EURUSD#", trade_mode=4, order_mode=127,
-                                          volume_min=0.01, volume_max=100, filling_mode=2,
+                                          volume_min=0.01, volume_max=100, volume_step=0.01, filling_mode=2,
                                           digits=5, trade_exemode=2)
         mt5.symbol_info = lambda _symbol: mt5.test_symbol
         mt5.symbol_info_tick = lambda _symbol: SimpleNamespace(ask=1.082, bid=1.081)

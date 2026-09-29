@@ -6,9 +6,13 @@
 
 ## 1. O que o aplicativo faz
 
-O ScalperLab é um aplicativo desktop local. A interface consulta o terminal MetaTrader 5 aberto no mesmo Windows, permite pesquisar fontes públicas, guardar estratégias para revisão, acompanhar posições abertas e iniciar motores em observação ou DEMO com confirmação explícita.
+O ScalperLab é um aplicativo desktop local. A interface consulta o terminal MetaTrader 5 aberto no mesmo Windows, permite pesquisar fontes públicas, guardar estratégias para revisão, acompanhar posições abertas e iniciar motores em observação, DEMO ou REAL com confirmação explícita e verificações do backend.
 
-O aplicativo não autentica diretamente no broker e não armazena senha do MT5. Você abre o terminal, entra na conta desejada e o conector Python consulta a sessão ativa. O caminho REAL existe no backend, mas ainda requer homologação técnica e operacional independente; consulte a seção 7 antes de avaliar esse uso.
+O aplicativo não autentica diretamente no broker e não armazena senha do MT5. Você abre o terminal, entra na conta desejada e o conector Python consulta a sessão ativa. O caminho REAL está implementado com confirmação explícita e verificações técnicas; a operação ainda precisa de homologação técnica e operacional independente antes de ser tratada como pronta.
+
+O cabeçalho do aplicativo mostra conexão do terminal, conta/modo, servidor e modo atual da automação. Ao clicar em **Iniciar execução DEMO/REAL** no Analista, o aplicativo confere automaticamente, somente por leitura, o Windows Time e ticks recentes do MT5 quando ainda não houver confirmação UTC válida. Depois apresenta uma única confirmação textual com conta, ativos e limites de risco. O backend repete as verificações antes de armar o motor. Se o relógio precisar de correção, o início é recusado e você pode usar **Verificar horário UTC** na lateral; essa ação manual pode solicitar confirmação UAC. A checagem automática do início não ajusta o relógio nem envia ordens. Observação permanece disponível. Não ajuste manualmente o fuso ou a hora para contornar a validação.
+
+O cartão **Estado operacional** e o cabeçalho resumem o Analista e o motor de estratégias. “Analista · DEMO” ou “Estratégias · DEMO” quer dizer que o respectivo modo está ativo e pode avaliar entradas; não confirma que uma ordem foi enviada. A decisão só aparece como confirmada quando o ScalperLab encontra a posição correspondente no MT5 e verifica os níveis de stop e alvo. Se o relógio UTC vencer durante a execução, o backend suspende novas entradas e mostra **Execução bloqueada**; posições que já existirem permanecem no terminal e devem ser conferidas por você.
 
 ## 2. Requisitos
 
@@ -31,7 +35,7 @@ O projeto fica em:
 1. Instale Python 3.12 e o terminal MT5, se ainda não estiverem instalados.
 2. Abra o terminal MT5, entre na conta DEMO e confirme que os preços estão atualizando.
 3. Abra a pasta `C:\ScalperLab 1.0` no Explorador de Arquivos.
-4. Dê duplo clique em `Iniciar-ScalperLab.bat`.
+4. Dê duplo clique em `Iniciar-ScalperLab.bat` e aceite o pedido do Windows (UAC) para executar como administrador. O inicializador solicita essa elevação porque a validação/correção do serviço de horário do Windows pode precisar dela.
 5. Na primeira execução, o script cria o ambiente `.venv` e instala as dependências do projeto. Isso pode levar alguns minutos.
 6. A janela do ScalperLab deve abrir. Confira no cabeçalho se terminal, conta, servidor e modo DEMO estão corretos.
 
@@ -39,7 +43,7 @@ Não feche a janela de terminal do processo enquanto estiver usando o aplicativo
 
 ### Inicialização pelo PowerShell
 
-Use esta alternativa se preferir executar manualmente:
+Use esta alternativa se preferir executar manualmente; abra o PowerShell com **Executar como administrador** antes:
 
 ```powershell
 Set-Location 'C:\ScalperLab 1.0'
@@ -105,27 +109,43 @@ Esta área contém o Analista de mercado e o motor declarativo. Eles são indepe
 
 #### Analista de mercado
 
-1. Informe de 1 a 12 símbolos exatamente como aparecem no Market Watch.
+1. Clique em **Atualizar lista do MT5**. O conector consulta os ativos visíveis no Market Watch da sessão conectada; use a busca e marque de 1 a 12 símbolos. Para adicionar um ativo, primeiro torne-o visível no próprio Market Watch do MT5 e atualize a lista no ScalperLab. O nome e o sufixo do broker são mantidos.
 2. Selecione o timeframe. M15 é a recomendação inicial; outros períodos expostos pelo MT5 também podem ser selecionados.
 3. Salve o perfil.
 4. Use **Iniciar observação** para calcular e mostrar leituras sem enviar ordens.
-5. Para envio automático em DEMO, confira cuidadosamente conta e ativos, clique **Iniciar execução DEMO**, digite exatamente `INICIAR ANALISTA SOMENTE DEMO` e confirme o diálogo.
-6. Acompanhe o estado no painel. O motor reinicia parado quando o aplicativo fecha ou reinicia.
+5. Para envio automático em DEMO, confira cuidadosamente conta, servidor e ativos e clique **Iniciar execução DEMO**. Se o Analista estiver em observação, confirme a troca; se o perfil mudou, ele será salvo. Quando o horário UTC não estiver validado, o aplicativo perguntará se pode fazer a verificação antes de prosseguir. Digite exatamente `INICIAR ANALISTA SOMENTE DEMO` e confirme o diálogo.
+6. Para execução REAL, conecte primeiro no MT5 a conta REAL correta e confirme o modo da conta, servidor, ativos e limites. Clique **Iniciar execução REAL**, leia os avisos, digite exatamente `AUTORIZO ANALISTA EM CONTA REAL` e confirme. A execução REAL só é aceita quando o terminal identifica uma conta REAL e a negociação está habilitada; a tela não converte nem trata uma sessão DEMO como REAL.
+7. Acompanhe o estado no painel. O motor reinicia parado quando o aplicativo fecha ou reinicia.
 
-A regra atual é uma heurística de pullback: tendência e momentum alinhados, candle fechado retomando a SMA 21, spread dentro do limite, stop derivado da estrutura recente, alvo de 1,5R, risco estimado de até 0,10% do equity e volume máximo de 0,01 lote. Antes de iniciar, o backend confere se os ativos configurados correspondem a símbolos visíveis no Market Watch. Uma entrada também depende dos bloqueios de conta, cotação, posição, pré-verificação e reconciliação do MT5. Isso é experimental, não evidência de vantagem estatística.
+O botão de execução conduz a validação de horário UTC quando ela estiver pendente. O aplicativo pode pedir confirmação antes de consultar/sincronizar o serviço Windows Time; essa etapa não envia ordens. Na troca de observação para execução, o backend para a observação e espera o ciclo em andamento terminar antes de iniciar o novo modo. Se a fonte NTP não permitir medição independente ou não houver tick MT5 recente para calibrar UTC, o aplicativo mantém o envio bloqueado. A confirmação vale por até 15 minutos; enquanto o aplicativo desktop estiver aberto, o monitor tenta renová-la em segundo plano a cada 4 minutos e repete uma tentativa temporariamente falha após 45 segundos. A renovação não ajusta o relógio nem rearma o motor. Durante a execução, os motores conferem a validade e a conta/terminal no começo de cada ciclo e antes de enviar uma ordem. Se a fonte mostrar desvio real, a conta mudar ou a confirmação expirar sem renovação, o motor suspende novas entradas; verifique posições no MT5, corrija o horário se necessário e inicie o motor novamente.
 
-A análise fundamental passa a exibir `PARCIAL` quando o Service de calendário MQL5 publica um snapshot recente da mesma conta e servidor. Ela lista eventos relacionados às moedas do ativo, importância e horário no fuso informado pelo MT5. Sem a ponte, com snapshot atrasado ou com conta divergente, o calendário aparece indisponível. Eventos ainda são contexto informativo: não mudam o lado do sinal nem bloqueiam ordens. Notícias, séries de juros e fundamentos por classe ainda não foram conectados; portanto o Analista **não confirma uma análise fundamental completa**.
+A regra atual opera no modo explícito **Técnica + quantitativa**: heurística de pullback com tendência e momentum alinhados, candle fechado retomando a SMA 21, spread dentro do limite, stop derivado da estrutura recente, alvo de 1,5R, risco estimado de até 0,10% do equity e volume máximo de 0,01 lote. Antes de iniciar, o backend confere se os ativos configurados correspondem a símbolos visíveis no Market Watch. Uma entrada também depende dos bloqueios de conta, cotação, posição, pré-verificação e reconciliação do MT5. Isso é experimental, não evidência de vantagem estatística.
+
+##### Replay e validação cronológica
+
+O painel **Replay e validação cronológica** compara a regra de pullback SMA 21 com um baseline simples de cruzamento do retorno de 20 candles. Ambos usam a mesma gestão simulada (stop ATR14, alvo 1,5R e premissas de spread/slippage/comissão/swap). O replay é somente leitura: não envia, modifica nem fecha ordens. O backend recusa a consulta enquanto o Analista ou o motor declarativo estiverem executando, pois compartilham o conector MT5.
+
+1. Pare os motores e confirme no cabeçalho que não há execução DEMO/REAL ativa.
+2. Escolha um ativo visível no Market Watch, timeframe e pelo menos 200 candles fechados. São solicitados até 2.500 candles OHLC do histórico carregado no terminal; os horários retornados pela API Python do MT5 são interpretados como UTC e o offset do tick atual não é subtraído deles.
+3. Informe slippage por lado, comissão total de ida e volta por lote e swap assinado por lote por virada de data UTC, com base na tabela da conta/corretora. Zero só deve ser informado quando o custo realmente for zero.
+4. Marque a confirmação de custos e clique **Executar replay somente leitura**.
+5. Compare os segmentos: os 70% iniciais mostram contexto de desenvolvimento; os 30% finais são o holdout cronológico. Observe as operações e métricas de cada regra, período, amostra e hash SHA-256. O snapshot dos candles/contrato e os parâmetros ficam guardados localmente por até 50 execuções.
+
+O holdout não deve ser usado repetidamente para ajustar parâmetros. O resultado mostra “amostra insuficiente” quando qualquer regra tem menos de 30 operações fechadas no holdout. Isso impede uma conclusão descritiva mínima, mas 30 operações não são um critério de aprovação estatística. Toda execução permanece **triagem OHLC não homologada**: entrada na abertura do candle seguinte; spread por barra; stop primeiro se stop e alvo couberem no mesmo candle; custos e slippage informados; conversão monetária usa valores atuais do contrato. Não são usados ticks reais, Strategy Tester, histórico integral de custos, rolagem tripla ou execução intrabar. Posições abertas no fim do segmento são censuradas. Antes de qualquer homologação, compare com ticks reais do broker ou Strategy Tester “Every tick based on real ticks”, defina critérios prévios e mantenha uma janela futura intocada. Nenhum resultado comprova rentabilidade ou autoriza operação REAL.
+
+A análise fundamental passa a exibir `PARCIAL` quando o Service de calendário MQL5 publica um snapshot recente da mesma conta e servidor. Ela lista eventos relacionados às moedas do ativo, importância e horário no fuso informado pelo MT5. Sem a ponte, com snapshot atrasado ou com conta divergente, o calendário aparece indisponível. No modo atual, eventos são informativos: não mudam o lado do sinal nem bloqueiam ordens. Notícias, séries de juros e fundamentos por classe ainda não foram conectados; portanto este modo **não é uma análise fundamental completa**. A opção futura de três camadas deverá exigir fonte atual e adequada ao ativo antes de permitir entradas.
 
 ##### Ativar o calendário econômico nativo do MT5
 
 O calendário é exposto a programas MQL5, mas não à API Python direta usada pelo ScalperLab. Para iniciar a ponte local:
 
-1. No MT5 conectado à conta que o ScalperLab usará, escolha **Arquivo → Abrir pasta de dados**.
-2. Dentro da pasta aberta, acesse `MQL5\Services` e copie para lá `C:\ScalperLab 1.0\mt5\ScalperLabCalendarService.mq5`.
-3. Abra o MetaEditor pelo MT5, localize o arquivo em Services e compile-o. Corrija qualquer erro antes de iniciar.
-4. No Navegador do MT5, atualize **Services**, localize `ScalperLabCalendarService` e inicie uma instância.
-5. Confirme no Diário/Experts a mensagem `ScalperLab Calendar Service: ... status disponivel`.
-6. Deixe o terminal conectado. O ScalperLab só aceita snapshots recentes vinculados ao mesmo login e servidor.
+1. Na versão empacotada, execute `Instalar-Servico-Calendario-MT5.bat` ao lado de `ScalperLab.exe`. A ferramenta detecta pastas de dados MT5 comuns e pede que você escolha uma; se necessário, abra **Arquivo → Abrir pasta de dados** no terminal e informe aquela pasta.
+2. O instalador copia `ScalperLabCalendarService.mq5` e `ScalperLabCalendarService.ex5` para `MQL5\Services`. Se já houver uma versão diferente, ela é preservada com backup antes da atualização. No projeto aberto pelo código-fonte, execute `tools\install-mt5-calendar-service.bat`.
+3. No Navegador do MT5, atualize **Services**, localize `ScalperLabCalendarService` e inicie uma instância. Se o terminal rejeitar o arquivo `.ex5`, abra o `.mq5` no MetaEditor pelo MT5, compile e corrija qualquer erro antes de iniciar.
+4. Confirme no Diário/Experts a mensagem `ScalperLab Calendar Service: ... status disponivel`.
+5. Deixe o terminal conectado. O ScalperLab só aceita snapshots recentes vinculados ao mesmo login e servidor.
+
+O conector Python de mercado e ordens está embutido em `ScalperLab.exe`; não há um EA separado para enviar ordens. O Service MQL5 descrito aqui só exporta dados do calendário e não negocia.
 
 O Service consulta a janela de 2 dias anteriores e 7 dias futuros a cada 60 segundos. O snapshot fica em `Terminal\Common\Files\ScalperLab_calendar_v1.json`. O timestamp de cada evento permanece no fuso do servidor da corretora; a interface identifica esse fuso e não o trata como UTC. O Service só consulta e exporta dados e não chama funções de negociação. Depois de iniciar uma instância no MT5, confira se ela continua ativa após reiniciar o terminal.
 
@@ -165,7 +185,7 @@ Não coloque chaves dentro dos arquivos do projeto, em estratégias importadas, 
 
 - conta: login, servidor, empresa, moeda, saldo, equity, resultado e alavancagem;
 - terminal: nome/build, conexão e permissão geral de negociação;
-- posições abertas: ticket, ativo, lado, volume, preços, SL/TP, resultado, horário e identificadores;
+- posições abertas, ordens pendentes e histórico de ordens/negócios por consultas do conector; o painel visual atual prioriza posições abertas e a auditoria conserva evidências de tentativas e reconciliações;
 - símbolo: dígitos, ponto, tamanho/valor de tick, tamanho do contrato, moedas base/lucro/margem, setor/país, swap, volume mínimo/máximo/passo, nível de stops e modos de preenchimento/execução;
 - mercado: candles OHLC fechados, tick volume/volume real disponível, spread de candle e tick atual de compra/venda com horário.
 
@@ -175,9 +195,9 @@ Ainda faltam, entre outros:
 
 - calendário econômico, notícias, taxas e fundamentos atuais e estruturados por classe de ativo;
 - leitura de ordens pendentes e histórico completo de ordens/negócios pelo aplicativo;
-- validação de margem e custos totais projetados integrada a cada sinal, além do risco estimado atual;
+- validação de margem e custos totais projetados integrada a cada sinal, além do risco estimado atual; o replay usa custos configurados e ainda não corresponde a uma simulação por ticks ou ao Strategy Tester;
 - fonte e normalização de dados para análise fundamentalista e avaliação de eventos;
-- homologação por broker, símbolo, sessão e timeframe, bem como replay/backtest e validação forward documentados.
+- comparação do replay com baseline simples, holdout cronológico, walk-forward e validação forward documentada;
 
 Logo, **o sistema não recebe hoje todas as informações necessárias para atuar como analista fundamentalista completo nem para homologar execução financeira de produção**. A disponibilidade de campos também depende do broker, símbolo, histórico carregado no terminal e configurações de barras máximas.
 
@@ -187,19 +207,19 @@ O conector pode identificar uma sessão REAL já aberta no terminal e ler estado
 
 Os motores possuem caminhos de envio REAL condicionados a confirmação textual específica, identificação de conta e servidor, permissões do terminal, sinal elegível, risco dentro do limite, stop/alvo válidos, ausência de posições/ordens pendentes e reconciliação após o envio. Fechamentos REAL também exigem armamento e confirmação. A conta CONTEST é recusada. Verifique sempre o modo e a identidade da conta no MT5 e no ScalperLab antes de qualquer armamento.
 
-**Conclusão: capacidade de envio REAL existe no código, mas não há homologação suficiente para qualificá-la como pronta para operação.** Ainda são necessários, no mínimo, política fundamental definida, replay sem look-ahead com custos do broker, forward test DEMO com critérios objetivos, cenários de falha e recuperação, limites de risco/exposição aprovados e revisão independente de segurança/execução. As confirmações explícitas são controles técnicos, não substituem essas evidências.
+**Conclusão: capacidade de envio REAL existe no código, mas não há homologação suficiente para qualificá-la como pronta para operação.** O replay atual é uma triagem reproduzível em OHLC: usa a regra atual, entrada estimada no candle seguinte, spread por candle e hipóteses informadas de comissão, swap e slippage. Ele não usa ticks reais, não reproduz integralmente custos históricos e execução intrabar do broker, e não demonstra vantagem estatística. Ainda são necessários, no mínimo, política fundamental definida, replay mais fiel aos ticks/custos do broker com validação cronológica, forward test DEMO com critérios objetivos, cenários de falha e recuperação, limites de risco/exposição aprovados e revisão independente de segurança/execução. As confirmações explícitas são controles técnicos, não substituem essas evidências.
 
 ## 8. Onde ficam os dados e como fazer cópia
 
 Banco local, perfis, estratégias, fontes e logs ficam em:
 
-`%LOCALAPPDATA%\ScalperLab\scalperlab.sqlite3`
+`%USERPROFILE%\ScalperLabData\scalperlab.sqlite3`
 
 Para criar uma cópia consistente sem copiar arquivos do banco manualmente, execute no PowerShell dentro da pasta do projeto:
 
 `\.venv\Scripts\python.exe -m scalperlab.database_backup`
 
-O arquivo SQLite é gravado em `%LOCALAPPDATA%\ScalperLab\backups` e passa por `integrity_check`. Para restaurar, feche o ScalperLab e execute:
+O arquivo SQLite é gravado em `%USERPROFILE%\ScalperLabData\backups` e passa por `integrity_check`. Para restaurar, feche o ScalperLab e execute:
 
 `\.venv\Scripts\python.exe -m scalperlab.database_backup --restore "CAMINHO_DO_BACKUP.sqlite3"`
 
@@ -228,3 +248,18 @@ A restauração exige digitar `RESTAURAR BANCO LOCAL` e guarda uma cópia autom�
 5. Só inicie DEMO se compreender a regra, o ativo, timeframe, risco e consequências de deixar o processo aberto.
 6. Monitore logs, posições e estado do terminal; o aplicativo não substitui supervisão humana.
 7. Ao terminar, pare o motor e confira posições diretamente no MT5. Fechar o ScalperLab não encerra automaticamente posições abertas.
+
+
+## Lote e risco — Configurações (28/09/2026)
+
+1. Abra **Configurações → Lote e risco** e selecione Analista ou Estratégias.
+2. Escolha automático por percentual, automático por valor monetário, ou lote fixo. O lote fixo continua sujeito ao teto percentual de risco, ao máximo por ordem e ao contrato do ativo.
+3. Defina lote máximo e reserva da margem livre. A reserva de 20% permite consumir no máximo 80% da margem livre disponível no momento. O limite percentual diário é compartilhado pelos dois motores.
+4. Pare os motores para salvar. Alterar valores não inicia operações, não altera SL/TP existentes e não apaga um bloqueio diário já atingido.
+5. Em **Prévia de lote e margem**, escolha um ativo real do Market Watch, compra/venda e o preço do stop. A cotação atual é usada como entrada. Salve alterações antes de calcular. A prévia não envia ordens e precisa ser refeita se o mercado mudar.
+6. Confira lote calculado, perda estimada, margem necessária e margem livre restante. Se o volume não respeitar mínimo/passo, risco ou reserva, a prévia informa o motivo. Não há aumento automático até o lote mínimo.
+7. Volte a **Risco e segurança** para iniciar o motor no modo desejado. O resumo e a confirmação exibem o perfil salvo. O envio reconfirma cotação, volume, risco, margem e identidade da conta.
+
+O dia de risco é UTC, independente da sessão da estratégia. A referência mostra o horário real da primeira leitura; não representa automaticamente o patrimônio de meia-noite. Reinício/troca de motor preservam consumo e bloqueio no mesmo dia. Depósitos/saques e crédito são reconciliados por identidade dos negócios de saldo; histórico indisponível ou revisado bloqueia novas entradas. O limite considera variação de patrimônio da conta inteira e não garante uma perda máxima executada.
+
+Informações sobre chaves, procedência e validação de arquivos ficam no grupo recolhível **Integrações de pesquisa e informações do aplicativo**, no fim de Configurações. Os custos do replay pertencem ao painel de replay e o alvo das estratégias continua no perfil da regra. O replay existente ainda não usa automaticamente estes novos perfis de dimensionamento.

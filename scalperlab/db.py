@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import zlib
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -95,8 +96,75 @@ class Database:
                     config_json TEXT NOT NULL DEFAULT '{}',
                     updated_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS replay_runs (
+                    run_id TEXT PRIMARY KEY,
+                    created_at TEXT NOT NULL,
+                    terminal_id TEXT NOT NULL,
+                    account_fingerprint_sha256 TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    timeframe TEXT NOT NULL,
+                    data_sha256 TEXT NOT NULL,
+                    parameters_json TEXT NOT NULL,
+                    result_json TEXT NOT NULL,
+                    dataset_zlib BLOB NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_replay_runs_created
+                    ON replay_runs(created_at DESC);
                 """
             )
+
+    def save_replay_run(self, *, run_id: str, terminal_id: str,
+                        account_fingerprint_sha256: str, symbol: str,
+                        timeframe: str, data_sha256: str,
+                        parameters: dict[str, Any], result: dict[str, Any],
+                        dataset: dict[str, Any]) -> None:
+        packed = zlib.compress(json.dumps(
+            dataset, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str
+        ).encode("utf-8"), level=9)
+        with self.connect() as connection:
+            connection.execute(
+                """INSERT INTO replay_runs
+                (run_id, created_at, terminal_id, account_fingerprint_sha256,
+                 symbol, timeframe, data_sha256, parameters_json, result_json, dataset_zlib)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (run_id, now_iso(), terminal_id, account_fingerprint_sha256,
+                 symbol, timeframe, data_sha256,
+                 json.dumps(parameters, ensure_ascii=False, default=str),
+                 json.dumps(result, ensure_ascii=False, default=str), packed),
+            )
+            connection.execute(
+                """DELETE FROM replay_runs WHERE run_id NOT IN
+                (SELECT run_id FROM replay_runs ORDER BY created_at DESC LIMIT 50)"""
+            )
+
+    def list_replay_runs(self, limit: int = 20) -> list[dict[str, Any]]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                """SELECT run_id, created_at, terminal_id, account_fingerprint_sha256,
+                symbol, timeframe, data_sha256, parameters_json, result_json
+                FROM replay_runs ORDER BY created_at DESC LIMIT ?""",
+                (max(1, min(limit, 50)),),
+            ).fetchall()
+        return [self._replay_run(row) for row in rows]
+
+    def get_replay_run(self, run_id: str) -> dict[str, Any] | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM replay_runs WHERE run_id = ?", (run_id,)
+            ).fetchone()
+        if not row:
+            return None
+        item = self._replay_run(row)
+        item["dataset"] = json.loads(zlib.decompress(row["dataset_zlib"]).decode("utf-8"))
+        return item
+
+    @staticmethod
+    def _replay_run(row: sqlite3.Row) -> dict[str, Any]:
+        item = dict(row)
+        item.pop("dataset_zlib", None)
+        item["parameters"] = json.loads(item.pop("parameters_json"))
+        item["result"] = json.loads(item.pop("result_json"))
+        return item
 
     def get_analyst_profile(self) -> dict[str, Any]:
         with self.connect() as connection:

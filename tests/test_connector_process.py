@@ -86,8 +86,11 @@ class ConnectorProcessTests(unittest.TestCase):
         try:
             self.assertTrue(connector.wait_until_ready(5))
             original_pid = connector.health().worker_pid
-            connector._process.terminate()
-            connector._process.join(timeout=2)
+            # Prevent the heartbeat from closing this Windows handle while the
+            # test is waiting on the deliberately terminated child process.
+            with connector._rpc_lock:
+                connector._process.terminate()
+                connector._process.join(timeout=2)
             deadline = time.monotonic() + 6
             restarted = False
             while time.monotonic() < deadline:

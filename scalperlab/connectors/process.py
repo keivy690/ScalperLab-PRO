@@ -34,11 +34,11 @@ class ConnectorHealth:
 
 
 _REMOTE_METHODS = {
-    "terminal_state", "account_state", "available_symbols", "market_watch_symbols",
+    "terminal_state", "account_state", "available_symbols", "market_watch_symbols", "market_watch_catalog",
     "tick", "rates", "orders", "positions", "history_orders", "history_deals",
     "history_order_by_ticket", "history_deals_by_position",
     "submit_order", "state",
-    "validate_market_symbols", "strategy_market_data", "current_tick", "economic_calendar",
+    "validate_market_symbols", "strategy_market_data", "historical_market_data", "current_tick", "economic_calendar",
     "risk_volume", "arm_order_engine", "disarm_order_engine",
     "send_demo_strategy_order", "send_real_strategy_order",
     "send_demo_analyst_order", "send_real_analyst_order", "arm_demo",
@@ -303,12 +303,22 @@ class ProcessMT5Connector:
         ok, result = self._rpc("market_watch_symbols")
         return result if ok else []
 
+    def market_watch_catalog(self) -> dict[str, Any]:
+        ok, result = self._rpc("market_watch_catalog")
+        return result if ok else {"available": False, "source": "MT5 Market Watch",
+                                  "count": 0, "items": [], "detail": result}
+
     def tick(self, broker_symbol: str) -> dict[str, Any]:
         ok, result = self._rpc("tick", broker_symbol)
         return result if ok else {"ok": False, "detail": result}
 
     def rates(self, broker_symbol: str, timeframe: str, count: int) -> dict[str, Any]:
         ok, result = self._rpc("rates", broker_symbol, timeframe, count)
+        return result if ok else {"ok": False, "detail": result}
+
+    def historical_market_data(self, symbol_name: str, count: int = 1200,
+                               timeframe: str = "M15") -> dict[str, Any]:
+        ok, result = self._rpc("historical_market_data", symbol_name, count, timeframe)
         return result if ok else {"ok": False, "detail": result}
 
     def orders(self) -> dict[str, Any]:
@@ -360,6 +370,9 @@ class ProcessMT5Connector:
                 return result
             if name in {"available_symbols", "market_watch_symbols"}:
                 return []
+            if name == "market_watch_catalog":
+                return {"available": False, "source": "MT5 Market Watch", "count": 0,
+                        "items": [], "detail": result}
             if name in {"positions", "orders", "history_orders", "history_deals"}:
                 return {"available": False, "detail": result, "items": []}
             if name == "validate_market_symbols":

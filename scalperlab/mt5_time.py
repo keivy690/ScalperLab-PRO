@@ -29,6 +29,12 @@ MT5_MAX_CLOSED_BAR_AGE_SECONDS = {
 class MT5TimeError(ValueError):
     """Raised when a live MT5 tick cannot safely anchor server timestamps to UTC."""
 
+    def __init__(self, message: str, *, code: str = "invalid_timestamp",
+                 diagnostics: dict | None = None) -> None:
+        super().__init__(message)
+        self.code = code
+        self.diagnostics = diagnostics or {}
+
 
 @dataclass(frozen=True, slots=True)
 class NormalizedTickTime:
@@ -40,18 +46,20 @@ class NormalizedTickTime:
 
 
 def normalize_tick_time(raw_time: int | float, raw_time_msc: int | float | None = None,
-                        *, now_epoch: float | None = None) -> NormalizedTickTime:
-    """Normalize MT5's terminal-clock timestamp using a fresh live tick.
+                        *, server_utc_offset_seconds: int,
+                        now_epoch: float | None = None) -> NormalizedTickTime:
+    """Apply an independently validated terminal offset; never infer it from a quote.
 
-    Some MT5 terminal builds/broker servers expose Unix-shaped timestamps in
-    trade-server time. Infer the current server-to-UTC offset from a fresh tick
-    and the host UTC clock. The offset is recalculated for each tick, so broker
-    DST changes do not leave a cached seasonal offset behind. Stale, malformed,
-    or clock-inconsistent ticks fail closed instead of receiving a guessed fix.
+    The caller validates the MQL5 clock snapshot's age/account and Windows UTC.
+    A stale quote cannot change the offset or become recent through rounding.
     """
     now = time.time() if now_epoch is None else float(now_epoch)
     if not math.isfinite(now):
         raise MT5TimeError("Relógio UTC local indisponível.")
+    offset = server_utc_offset_seconds
+    if (isinstance(offset, bool) or not isinstance(offset, int)
+            or abs(offset) > MAX_SERVER_UTC_OFFSET_SECONDS):
+        raise MT5TimeError("Offset validado do serviço MQL5 ausente ou inválido.")
 
     try:
         raw_seconds = float(raw_time)
@@ -60,35 +68,32 @@ def normalize_tick_time(raw_time: int | float, raw_time_msc: int | float | None 
         raise MT5TimeError("Timestamp do tick MT5 inválido.") from exc
     if not math.isfinite(raw_seconds) or raw_seconds <= 0:
         raise MT5TimeError("Timestamp do tick MT5 ausente ou inválido.")
-    if math.isfinite(raw_milliseconds) and raw_milliseconds > 0:
+    if not math.isfinite(raw_milliseconds) or raw_milliseconds < 0:
+        raise MT5TimeError("Timestamp time_msc do tick MT5 inválido.")
+    if raw_milliseconds > 0:
         if abs(raw_seconds - raw_milliseconds / 1000.0) > 2.0:
             raise MT5TimeError("Campos time e time_msc do tick MT5 são inconsistentes.")
         observed_server_time = raw_milliseconds / 1000.0
     else:
         observed_server_time = raw_seconds
 
-    observed_offset = observed_server_time - now
-    offset = int(round(observed_offset / SERVER_UTC_OFFSET_QUANTUM_SECONDS)
-                 * SERVER_UTC_OFFSET_QUANTUM_SECONDS)
-    if abs(offset) > MAX_SERVER_UTC_OFFSET_SECONDS:
-        raise MT5TimeError("Offset do relógio do terminal fora da faixa de fusos reconhecida.")
-
-    residual = observed_offset - offset
-    if abs(residual) > MAX_OFFSET_CALIBRATION_RESIDUAL_SECONDS:
-        raise MT5TimeError("Tick e relógio local não permitem determinar um offset confiável.")
-
     normalized_milliseconds = int(round(observed_server_time * 1000.0)) - offset * 1000
     normalized_time = normalized_milliseconds // 1000
     age = now - normalized_milliseconds / 1000.0
+    diagnostics = {"raw_time": raw_time, "raw_time_msc": raw_time_msc,
+                   "server_utc_offset_seconds": offset, "age_seconds": round(age, 3),
+                   "utc_time": normalized_time}
     if age < -MAX_FUTURE_TIME_SKEW_SECONDS:
-        raise MT5TimeError("O tick permanece no futuro após a normalização UTC.")
+        raise MT5TimeError("O tick permanece no futuro após a normalização UTC.",
+                           code="future_tick", diagnostics=diagnostics)
     if age > MAX_TICK_AGE_SECONDS:
-        raise MT5TimeError("O tick está desatualizado; a análise e a execução foram bloqueadas.")
+        raise MT5TimeError("Cotação desatualizada; análise e entrada neste ativo aguardam tick recente.",
+                           code="stale_tick", diagnostics=diagnostics)
 
     return NormalizedTickTime(
         utc_time=normalized_time,
         utc_time_msc=normalized_milliseconds,
         server_utc_offset_seconds=offset,
         age_seconds=age,
-        calibration_residual_seconds=residual,
+        calibration_residual_seconds=-age,
     )

@@ -37,6 +37,7 @@ class AuditedTradingPort:
     ) -> None:
         self.connector = connector
         self.database = database
+        self.risk_settings = None
         self.terminal_id = connector.terminal_id
         self.symbol_mappings = {
             key.upper(): value for key, value in (symbol_mappings or {}).items()
@@ -132,6 +133,8 @@ class AuditedTradingPort:
             selected.update(
                 {key: kwargs[key] for key in names if key in kwargs and key not in sensitive}
             )
+        if "risk_policy" in kwargs:
+            selected["risk_policy"] = kwargs["risk_policy"]
         canonical = selected.get("symbol")
         if canonical:
             canonical_text = str(canonical)
@@ -178,6 +181,39 @@ class AuditedTradingPort:
         return f"SC{correlation_id.replace('-', '')[:10]}".upper()
 
     def _invoke(self, method: str, target, args: tuple, kwargs: dict[str, Any]) -> dict[str, Any]:
+        if self.risk_settings and method == "submit_order":
+            order = args[0] if args and isinstance(args[0], dict) else {}
+            engine, mode = order.get("engine"), str(order.get("mode", "")).lower()
+            if engine not in {"analyst", "strategy"} or mode not in {"demo", "real"}:
+                return {"ok": False, "detail": "Intenção de ordem sem motor/conta válidos."}
+            try:
+                positional = (order["symbol"], order["side"], order["volume"], order["stop"], order["target"])
+                if engine == "strategy":
+                    positional += (order["strategy_id"],)
+                sender = f"send_{mode}_{engine}_order"
+                return self._invoke(sender, getattr(self.connector, sender), positional, {
+                    "expected_account_fingerprint": order["account_fingerprint"],
+                    "risk_cash": order["risk_cash"], "risk_policy": order.get("risk_policy")})
+            except KeyError:
+                return {"ok": False, "detail": "Intenção de ordem incompleta."}
+        if self.risk_settings and method in {"send_demo_strategy_order", "send_real_strategy_order", "send_demo_analyst_order", "send_real_analyst_order"}:
+            engine = "analyst" if "analyst" in method else "strategy"
+            account = self.connector.state().get("account") or {}
+            daily = self.risk_settings.daily_check(self.connector, account)
+            if not daily["ok"]:
+                return {**daily, "blocked": True}
+            policy = self.risk_settings.profile(engine)
+            requested_policy = kwargs.get("risk_policy")
+            if requested_policy != policy:
+                return {"ok": False, "blocked": True, "detail": "Perfil de risco mudou antes do envio; sinal descartado."}
+            budget = min(self.risk_settings.budget(engine, account), daily["remaining_cash"])
+            risk_index = 6 if engine == "analyst" else 7
+            args_list = list(args)
+            if len(args_list) > risk_index:
+                args_list[risk_index] = min(float(args_list[risk_index]), budget)
+                args = tuple(args_list)
+            else:
+                kwargs = {**kwargs, "risk_cash": min(float(kwargs.get("risk_cash", budget)), budget)}
         correlation_id = str(uuid.uuid4())
         started = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
         request = self._request_data(method, args, kwargs, correlation_id)

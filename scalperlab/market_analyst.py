@@ -15,6 +15,8 @@ from .trading.ports import TradingPort
 
 TIMEFRAMES_SECONDS = MT5_TIMEFRAME_SECONDS
 SYMBOL_PATTERN = MT5_SYMBOL_PATTERN
+ANALYSIS_BASIS = "technical_quantitative"
+ANALYSIS_BASIS_LABEL = "Técnica + quantitativa"
 
 
 def _sma(values: list[float], period: int) -> float | None:
@@ -210,13 +212,14 @@ def analyze_market(symbol: str, timeframe: str, bars: list[dict[str, Any]],
         "detail": "Sem feed estruturado de eventos, taxas e dados fundamentais compatíveis com a classe do ativo.",
         "events": [],
     }
-    reasons.append("Análise fundamental parcial; o calendário informa eventos, mas não confirma direção. Notícias e séries macro ainda não foram integradas.")
+    reasons.append("Base da regra: técnica + quantitativa. Dados fundamentais e calendário são informativos; não participam do gatilho de entrada.")
     eligible = bool(direction and pullback and spread_ok and stop is not None and target is not None)
     if eligible:
         reasons.insert(0, "Sinal experimental de pullback confirmado em candle fechado; sujeito às verificações de DEMO e risco.")
     action = ("CANDIDATO_COMPRA" if direction == "BUY" else "CANDIDATO_VENDA") if eligible else "AGUARDAR"
     return {
         "symbol": symbol.upper(), "timeframe": timeframe,
+        "decision_basis": ANALYSIS_BASIS,
         "analyzed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "last_closed_bar_at": datetime.fromtimestamp(latest["time"], timezone.utc).isoformat(timespec="seconds"),
         "bars_used": len(clean),
@@ -238,8 +241,11 @@ def analyze_market(symbol: str, timeframe: str, bars: list[dict[str, Any]],
             "method_note": "Estatísticas descritivas de barras fechadas; não são probabilidade nem evidência de vantagem.",
         },
         "fundamental": fundamental,
-        "decision": {"action": action, "directional_context": aligned_bias,
-                     "order_eligible": eligible, "side": direction if eligible else None,
+        "decision": {"basis": ANALYSIS_BASIS, "basis_label": ANALYSIS_BASIS_LABEL,
+                     "fundamental_required": False,
+                     "action": action, "directional_context": aligned_bias,
+                     "order_eligible": eligible, "signal_eligible": eligible,
+                     "side": direction if eligible else None,
                      "entry_reference": latest["close"] if eligible else None,
                      "stop": stop if eligible else None, "target": target if eligible else None,
                      "risk_reward": 1.5 if eligible else None, "setup": "pullback_sma21_closed_candle",
@@ -257,11 +263,15 @@ def analyze_market(symbol: str, timeframe: str, bars: list[dict[str, Any]],
 
 def _insufficient(symbol: str, timeframe: str, count: int, detail: str) -> dict[str, Any]:
     return {
-        "symbol": symbol, "timeframe": timeframe, "analyzed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "symbol": symbol, "timeframe": timeframe, "decision_basis": ANALYSIS_BASIS,
+        "analyzed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "bars_used": count, "technical": {"status": "unavailable", "detail": detail},
         "quantitative": {"status": "unavailable", "detail": detail},
         "fundamental": {"status": "unavailable", "bias": "unknown", "detail": "Análise bloqueada por dados insuficientes."},
-        "decision": {"action": "AGUARDAR", "directional_context": "indisponível", "order_eligible": False,
+        "decision": {"basis": ANALYSIS_BASIS, "basis_label": ANALYSIS_BASIS_LABEL,
+                     "fundamental_required": False,
+                     "action": "AGUARDAR", "directional_context": "indisponível",
+                     "order_eligible": False, "signal_eligible": False,
                      "reasons": [detail, "Nenhuma ordem foi enviada."]},
     }
 
@@ -269,14 +279,18 @@ def _insufficient(symbol: str, timeframe: str, count: int, detail: str) -> dict[
 class MarketAnalystEngine:
     """Continuous market analysis with explicit observation and demo-execution modes."""
 
-    def __init__(self, database: Any, gateway: TradingPort, interval_seconds: int = 30) -> None:
+    def __init__(self, database: Any, gateway: TradingPort, interval_seconds: int = 30,
+                 clock_service: Any | None = None, risk_settings=None) -> None:
         self.database = database
         self.gateway = gateway
+        self.clock_service = clock_service
+        self.risk_settings = risk_settings
         self.interval_seconds = max(15, int(interval_seconds))
         saved_config = database.get_analyst_profile()
         self.config: dict[str, Any] = saved_config if isinstance(saved_config, dict) else {}
         self.config.setdefault("symbols", [])
         self.config.setdefault("timeframe", "M15")
+        self.config.setdefault("decision_basis", ANALYSIS_BASIS)
         self.config.setdefault("risk_per_trade_pct", 0.10)
         self.config.setdefault("daily_loss_limit_pct", 1.0)
         self.state: dict[str, Any] = {
@@ -285,32 +299,70 @@ class MarketAnalystEngine:
             "risk_day": None, "day_start_equity": None, "attempted_signals": [],
         }
         self._lock = threading.RLock()
+        self._cycle_lock = threading.RLock()
         self._shutdown = threading.Event()
         self._thread: threading.Thread | None = None
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
-            return {"config": copy.deepcopy(self.config), "state": copy.deepcopy(self.state),
+            return {"config": {**copy.deepcopy(self.config), **(self.risk_settings.profile("analyst") if self.risk_settings else {})}, "state": copy.deepcopy(self.state),
+                    "decision_basis": self.config.get("decision_basis", ANALYSIS_BASIS),
                     "interval_seconds": self.interval_seconds,
                     "timeframes": list(TIMEFRAMES_SECONDS),
-                    "order_sending": self.state.get("running") and self.state.get("mode") in {"demo", "real"}}
+                    "execution_mode_active": bool(
+                        self.state.get("running") and self.state.get("mode") in {"demo", "real"})}
+
+    def _clock_failure(self, account_fingerprint: str | None, *, fresh_measurement: bool = False) -> str | None:
+        """Return a fail-closed reason unless the current terminal/account clock check is valid."""
+        if self.clock_service is None:
+            return "Verificação UTC indisponível no motor; nenhuma ordem será enviada."
+        try:
+            terminal_id = getattr(self.gateway, "terminal_id", None)
+            clock_state = self.clock_service.snapshot()
+            if (clock_state.get("status") != "synchronized"
+                    or clock_state.get("mt5_status") != "verified"):
+                return (clock_state.get("detail")
+                        or "Validação UTC expirada ou incompleta; verifique o relógio antes de executar.")
+            verifier = (self.clock_service.is_verified if fresh_measurement
+                        else self.clock_service.is_currently_verified)
+            if not verifier(terminal_id=terminal_id, account_fingerprint=account_fingerprint):
+                return "A validação UTC deixou de ser válida para este terminal/conta; verifique novamente."
+        except Exception:
+            return "Não foi possível revalidar o relógio UTC; nenhuma ordem será enviada."
+        return None
+
+    def _suspend_for_clock(self, reason: str) -> None:
+        detail = f"Execução suspensa por validação UTC expirada ou inválida: {reason} Nenhuma nova ordem será enviada; confira posições no MT5."
+        self.stop(detail, phase="bloqueado_relogio")
+        try:
+            self.database.add_log("WARN", f"Analista: {detail}")
+        except Exception:
+            pass
 
     def configure(self, payload: dict[str, Any]) -> dict[str, Any]:
         raw_symbols = payload.get("symbols", payload.get("symbol", ""))
-        symbols = list(dict.fromkeys(part.strip() for part in str(raw_symbols).split(",") if part.strip()))
+        if isinstance(raw_symbols, list):
+            symbols = list(dict.fromkeys(part.strip() for part in raw_symbols
+                                         if isinstance(part, str) and part.strip()))
+        else:
+            symbols = list(dict.fromkeys(part.strip() for part in str(raw_symbols).split(",") if part.strip()))
         timeframe = str(payload.get("timeframe", "M15")).strip().upper()
+        decision_basis = str(payload.get("decision_basis", ANALYSIS_BASIS)).strip()
         if not symbols or len(symbols) > 12 or any(not SYMBOL_PATTERN.fullmatch(item) for item in symbols):
             return {"ok": False, "detail": "Informe de 1 a 12 símbolos válidos do Market Watch, separados por vírgula."}
         if timeframe not in TIMEFRAMES_SECONDS:
             return {"ok": False, "detail": "Timeframe MT5 inválido."}
+        if decision_basis != ANALYSIS_BASIS:
+            return {"ok": False, "detail": "Base indisponível. O único modo ativo é Técnica + quantitativa; três camadas aguardam dados fundamentais adequados."}
         with self._lock:
             if self.state.get("running"):
                 return {"ok": False, "detail": "Pare o Analista antes de alterar o perfil; isso evita trocar os parâmetros durante um ciclo."}
             self.config = {"symbols": symbols, "timeframe": timeframe,
+                           "decision_basis": decision_basis,
                            "risk_per_trade_pct": 0.10, "daily_loss_limit_pct": 1.0}
             self.state.update(phase="configurado", detail="Perfil salvo. A análise contínua ainda não começou.", analyses=[])
             self.database.save_analyst_profile(self.config)
-        return {"ok": True, "detail": "Perfil do analista salvo; nenhuma ordem será enviada."}
+        return {"ok": True, "detail": "Perfil salvo no modo Técnica + quantitativa. O calendário é informativo e não participa do gatilho."}
 
     def start(self, mode: str = "observacao", confirmation: str = "") -> dict[str, Any]:
         with self._lock:
@@ -318,6 +370,8 @@ class MarketAnalystEngine:
                 return {"ok": False, "detail": "Analista já iniciado; pare-o antes de alterar o modo."}
             if not self.config.get("symbols"):
                 return {"ok": False, "detail": "Informe ao menos um símbolo antes de iniciar."}
+            if self.config.get("decision_basis") != ANALYSIS_BASIS:
+                return {"ok": False, "detail": "Base de decisão não suportada; salve novamente o perfil Técnica + quantitativa."}
         terminal = self.gateway.state()
         if not terminal.get("connected"):
             return {"ok": False, "detail": terminal.get("detail") or "Conecte o MT5 antes de iniciar a análise."}
@@ -334,6 +388,16 @@ class MarketAnalystEngine:
         account = terminal.get("account") or {}
         if mode not in {"observacao", "demo", "real"}:
             return {"ok": False, "detail": "Modo de operação inválido."}
+        if mode in {"demo", "real"}:
+            catalog = self.gateway.market_watch_catalog()
+            if not catalog.get("available"):
+                return {"ok": False, "detail": catalog.get("detail") or "Não foi possível consultar as permissões dos ativos no MT5."}
+            contracts = {item.get("broker_symbol"): item for item in catalog.get("items", [])}
+            not_tradable = [symbol for symbol in self.config.get("symbols", [])
+                            if not contracts.get(symbol, {}).get("trade_enabled", False)]
+            if not_tradable:
+                return {"ok": False, "detail": "Execução exige ativos negociáveis pelo broker; ajuste a seleção: "
+                        + ", ".join(not_tradable) + "."}
         if mode == "demo":
             if confirmation != "INICIAR ANALISTA SOMENTE DEMO":
                 return {"ok": False, "detail": "Confirmação incorreta. Nenhuma ordem foi habilitada."}
@@ -349,26 +413,39 @@ class MarketAnalystEngine:
         elif mode != "observacao":
             return {"ok": False, "detail": "Modo inválido."}
         fingerprint = f"{account.get('login')}@{account.get('server')}"
+        if self.risk_settings and mode in {"demo", "real"}:
+            daily = self.risk_settings.daily_check(self.gateway, account)
+            if not daily["ok"]:
+                return daily
+        if mode in {"demo", "real"}:
+            clock_failure = self._clock_failure(fingerprint, fresh_measurement=True)
+            if clock_failure:
+                return {"ok": False, "detail": f"Execução bloqueada: {clock_failure}"}
         with self._lock:
             if mode in {"demo", "real"} and not self.gateway.arm_order_engine(
                     "analyst", account["mode"], fingerprint):
                 return {"ok": False, "detail": "Outro motor de execução já está armado; pare-o antes de iniciar o Analista."}
             self.state.update(running=True, mode=mode, phase="inicializando",
+                              decision_basis=ANALYSIS_BASIS,
                               account_fingerprint=fingerprint,
                               risk_day=datetime.now(timezone.utc).date().isoformat(),
                               day_start_equity=float(account.get("equity", 0) or 0),
                               attempted_signals=[],
-                              detail=(f"Análise contínua iniciada em {mode.upper()}; ordens só saem após sinal e preflight completos."
-                                      if mode in {"demo", "real"} else "Análise contínua iniciada em observação; não envia ordens."))
-        return {"ok": True, "detail": "Analista iniciado em " + (f"{mode.upper()} com envio condicionado a sinal e limites" if mode in {"demo", "real"} else "observação, sem envio de ordens") + "."}
+                              detail=(f"Modo Técnica + quantitativa iniciado em {mode.upper()}; fundamental/calendário são informativos. Ordens dependem de sinal e preflight."
+                                      if mode in {"demo", "real"} else "Modo Técnica + quantitativa iniciado em observação; não envia ordens."))
+        return {"ok": True, "detail": "Analista Técnica + quantitativa iniciado em " + (f"{mode.upper()} com envio condicionado a sinal e limites" if mode in {"demo", "real"} else "observação, sem envio de ordens") + "."}
 
-    def stop(self, reason: str | None = None) -> dict[str, Any]:
+    def stop(self, reason: str | None = None, *, phase: str = "parado") -> dict[str, Any]:
         with self._lock:
             was_armed = self.state.get("mode") in {"demo", "real"}
             previous_mode = self.state.get("mode")
-            self.state.update(running=False, mode="parado", phase="parado",
+            self.state.update(running=False, mode="parado", phase=phase,
                               detail=reason or "Análise contínua parada; posições já abertas permanecem no MT5.")
             self.gateway.disarm_order_engine("analyst")
+        # A mode change waits for any in-flight observation cycle to finish. Since
+        # running is already false, that cycle cannot begin a new order submission.
+        with self._cycle_lock:
+            pass
         return {"ok": True, "detail": reason or (f"Análise/execução {previous_mode.upper()} parada; posições abertas permanecem no MT5." if was_armed else "Análise contínua parada.")}
 
     def start_service(self) -> None:
@@ -388,45 +465,67 @@ class MarketAnalystEngine:
         while not self._shutdown.is_set():
             with self._lock:
                 running = self.state.get("running", False)
-                config = copy.deepcopy(self.config)
             if running:
-                results = []
-                for symbol in config.get("symbols", []):
-                    if self._shutdown.is_set():
-                        break
-                    try:
-                        market = self.gateway.strategy_market_data(symbol, 300, config["timeframe"])
-                        if not market.get("ok"):
+                with self._cycle_lock:
+                    with self._lock:
+                        running = self.state.get("running", False)
+                        mode = self.state.get("mode", "parado")
+                        fingerprint = self.state.get("account_fingerprint")
+                        config = (copy.deepcopy(self.config) if running else
+                                  {"symbols": [], "timeframe": self.config.get("timeframe", "M15")})
+                    if running and mode in {"demo", "real"}:
+                        clock_failure = self._clock_failure(fingerprint)
+                        if clock_failure:
+                            self._suspend_for_clock(clock_failure)
+                            config["symbols"] = []
+                    results = []
+                    for symbol in config.get("symbols", []):
+                        if self._shutdown.is_set():
+                            break
+                        with self._lock:
+                            if not self.state.get("running"):
+                                break
+                        try:
+                            market = self.gateway.strategy_market_data(symbol, 300, config["timeframe"])
+                            if not market.get("ok"):
+                                results.append({"symbol": symbol, "timeframe": config["timeframe"],
+                                                "decision": {"action": "AGUARDAR",
+                                                             "directional_context": "indisponível", "order_eligible": False,
+                                                             "reasons": [market.get("detail", "Dados indisponíveis.")]},
+                                                "technical": {"status": "unavailable"},
+                                                "quantitative": {"status": "unavailable"},
+                                                "fundamental": {"status": "unavailable", "bias": "unknown"}})
+                                continue
+                            tick = self.gateway.current_tick(symbol)
+                            fundamental = self.gateway.economic_calendar(symbol)
+                            analysis = analyze_market(symbol, config["timeframe"], market["bars"],
+                                                      market.get("contract", {}), tick if tick.get("ok") else None,
+                                                      fundamental=fundamental)
+                            analysis["time_normalization"] = market.get("time_normalization")
+                            self._maybe_execute(symbol, analysis, market, tick)
+                            results.append(analysis)
+                        except Exception as exc:
                             results.append({"symbol": symbol, "timeframe": config["timeframe"],
                                             "decision": {"action": "AGUARDAR",
                                                          "directional_context": "indisponível", "order_eligible": False,
-                                                         "reasons": [market.get("detail", "Dados indisponíveis.")]},
+                                                         "reasons": [f"Falha segura ({type(exc).__name__}); nenhuma ordem foi enviada."]},
                                             "technical": {"status": "unavailable"},
                                             "quantitative": {"status": "unavailable"},
                                             "fundamental": {"status": "unavailable", "bias": "unknown"}})
-                            continue
-                        tick = self.gateway.current_tick(symbol)
-                        fundamental = self.gateway.economic_calendar(symbol)
-                        analysis = analyze_market(symbol, config["timeframe"], market["bars"],
-                                                  market.get("contract", {}), tick if tick.get("ok") else None,
-                                                  fundamental=fundamental)
-                        analysis["time_normalization"] = market.get("time_normalization")
-                        self._maybe_execute(symbol, analysis, market, tick)
-                        results.append(analysis)
-                    except Exception as exc:
-                        results.append({"symbol": symbol, "timeframe": config["timeframe"],
-                                        "decision": {"action": "AGUARDAR",
-                                                     "directional_context": "indisponível", "order_eligible": False,
-                                                     "reasons": [f"Falha segura ({type(exc).__name__}); nenhuma ordem foi enviada."]},
-                                        "technical": {"status": "unavailable"},
-                                        "quantitative": {"status": "unavailable"},
-                                        "fundamental": {"status": "unavailable", "bias": "unknown"}})
-                with self._lock:
-                    if self.state.get("running"):
-                        self.state.update(phase="analisando" if results else "indisponivel",
-                                          detail=f"Último ciclo concluído para {len(results)} símbolo(s); modo {self.state.get('mode')}.",
-                                          analyses=results,
-                                          last_cycle_at=datetime.now(timezone.utc).isoformat(timespec="seconds"))
+                    with self._lock:
+                        if results:
+                            # Keep the final decision visible even when a clock failure,
+                            # risk stop, or uncertain send disarms the analyst mid-cycle.
+                            update = {
+                                "analyses": results,
+                                "last_cycle_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                            }
+                            if self.state.get("running"):
+                                update.update(
+                                    phase="analisando",
+                                    detail=f"Último ciclo concluído para {len(results)} símbolo(s); modo {self.state.get('mode')}.",
+                                )
+                            self.state.update(**update)
             self._shutdown.wait(self.interval_seconds)
 
     def _maybe_execute(self, symbol: str, analysis: dict[str, Any], market: dict[str, Any],
@@ -445,24 +544,30 @@ class MarketAnalystEngine:
                 return
             attempted.add(key)
             self.state["attempted_signals"] = list(attempted)[-500:]
+            run_mode = self.state.get("mode")
             fingerprint = self.state.get("account_fingerprint")
             start_equity = float(self.state.get("day_start_equity") or 0)
         terminal = self.gateway.state()
         account = terminal.get("account") or {}
         current_fingerprint = f"{account.get('login')}@{account.get('server')}"
-        run_mode = self.state.get("mode")
         expected_mode = "REAL" if run_mode == "real" else "DEMO"
         if (not terminal.get("connected") or account.get("mode") != expected_mode
                 or current_fingerprint != fingerprint or not terminal.get("terminal", {}).get("trade_allowed")):
             decision["execution_status"] = "BLOQUEADO_CONTA_OU_TERMINAL"
             decision["reasons"].append(f"Conta {expected_mode}, identidade ou permissão do terminal mudou; envio cancelado.")
             return
+        daily = self.risk_settings.daily_check(self.gateway, account) if self.risk_settings else None
+        if daily and not daily["ok"]:
+            decision["execution_status"] = "LIMITE_DIARIO_INDISPONIVEL"
+            decision["reasons"].append(daily["detail"])
+            self.stop(daily["detail"])
+            return
         utc_day = datetime.now(timezone.utc).date().isoformat()
         if self.state.get("risk_day") != utc_day:
             with self._lock:
                 self.state.update(risk_day=utc_day, day_start_equity=float(account.get("equity", 0) or 0))
                 start_equity = float(self.state.get("day_start_equity") or 0)
-        if start_equity <= 0 or float(account.get("equity", 0)) <= start_equity * 0.99:
+        if not self.risk_settings and (start_equity <= 0 or float(account.get("equity", 0)) <= start_equity * 0.99):
             decision["execution_status"] = "LIMITE_DIARIO_ATINGIDO"
             decision["reasons"].append("Equity inválida ou limite diário de perda de 1% atingido; motor parado.")
             self.stop("Limite diário DEMO atingido; verifique equity e posições no MT5.")
@@ -481,21 +586,46 @@ class MarketAnalystEngine:
             decision["reasons"].append("Preço de execução invalidou a relação entrada/stop/alvo; sinal descartado.")
             return
         target = entry + 1.5 * (entry - stop) if side == "BUY" else entry - 1.5 * (stop - entry)
-        risk_cash = float(account.get("equity", 0)) * 0.001
-        sizing = self.gateway.risk_volume(symbol, side, entry, stop, risk_cash, 0.01)
+        policy = self.risk_settings.profile("analyst") if self.risk_settings else None
+        risk_cash = (min(self.risk_settings.budget("analyst", account), daily["remaining_cash"])
+                     if self.risk_settings else float(account.get("equity", 0)) * 0.001)
+        sizing = self.gateway.risk_volume(symbol, side, entry, stop, risk_cash,
+                                        policy["max_volume"] if policy else .01,
+                                        **({"policy": policy} if policy else {}))
+        decision["sizing"] = sizing
         if not sizing.get("ok"):
             decision["execution_status"] = "RISCO_BLOQUEADO"
             decision["reasons"].append(sizing.get("detail", "Dimensionamento falhou."))
             return
         send_order = (self.gateway.send_real_analyst_order if run_mode == "real"
                       else self.gateway.send_demo_analyst_order)
-        result = send_order(
-            symbol, side, sizing["volume"], stop, target, fingerprint, risk_cash,
-            float(analysis["technical"]["atr14"]) * 0.08, 1.5)
-        decision["execution_status"] = "CONFIRMADA" if result.get("ok") else "FALHA_SEM_REENVIO"
+        with self._lock:
+            if not self.state.get("running") or self.state.get("mode") != run_mode:
+                decision["execution_status"] = "CANCELADA_MOTOR_PARADO"
+                decision["reasons"].append("O motor foi parado antes do envio; nenhuma ordem foi solicitada.")
+                return
+            clock_failure = self._clock_failure(fingerprint)
+            if clock_failure:
+                decision["execution_status"] = "BLOQUEADO_RELOGIO_UTC"
+                decision["reasons"].append(clock_failure)
+                self._suspend_for_clock(clock_failure)
+                return
+            # Keep stop/reconfigure serialized with the final preflight and send.
+            # A stop request arriving after this point waits for the current RPC.
+            result = send_order(
+                symbol, side, sizing["volume"], stop, target, fingerprint, risk_cash,
+                float(analysis["technical"]["atr14"]) * 0.08, 1.5,
+                **({"risk_policy": policy} if policy else {}))
+        reconciled = result.get("ok") is True and result.get("reconciled") is True
+        decision["execution_status"] = (
+            "CONFIRMADA_MT5" if reconciled
+            else "ACEITA_AGUARDANDO_RECONCILIACAO" if result.get("ok") is True
+            else "RESULTADO_DESCONHECIDO" if result.get("unknown") or result.get("position_may_remain")
+            else "NAO_EXECUTADA")
         decision["execution"] = {key: result.get(key) for key in ("ticket", "order", "deal", "volume", "price", "sl", "tp", "detail")}
         decision["reasons"].append(result.get("detail", "Resultado de envio indisponível."))
-        self.database.add_log("INFO" if result.get("ok") else "CRITICAL" if result.get("unknown") else "WARN",
+        self.database.add_log("INFO" if reconciled else "CRITICAL" if result.get("unknown") or result.get("position_may_remain") or result.get("ok") else "WARN",
                               f"Analista {expected_mode} {symbol} {side}: {result.get('detail', 'sem detalhe')}")
-        if result.get("unknown") or result.get("position_may_remain"):
-            self.stop(f"Envio/reconciliação {expected_mode} incertos; motor parado e sem repetição automática.")
+        if result.get("unknown") or result.get("position_may_remain") or (result.get("ok") and not reconciled):
+            self.stop(f"Envio/reconciliação {expected_mode} incertos; motor parado e sem repetição automática.",
+                      phase="resultado_desconhecido")

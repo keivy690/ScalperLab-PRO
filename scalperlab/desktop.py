@@ -16,6 +16,7 @@ def run_desktop() -> None:
     app = None
     engine = None
     analyst = None
+    clock_monitor = None
     server = None
     thread = None
     try:
@@ -27,8 +28,10 @@ def run_desktop() -> None:
         app = create_app()
         engine = app.extensions["scalper_engine"]
         analyst = app.extensions["scalper_analyst"]
+        clock_monitor = app.extensions["scalper_clock_monitor"]
         engine.start_service()
         analyst.start_service()
+        clock_monitor.start()
         server = make_server("127.0.0.1", 0, app, threaded=True)
         port = int(server.server_port)
         app.config["APP_HOST"] = f"127.0.0.1:{port}"
@@ -41,6 +44,8 @@ def run_desktop() -> None:
         webview.start(debug=False, icon=str(icon_path) if icon_path.is_file() else None)
     finally:
         try:
+            if clock_monitor is not None:
+                clock_monitor.shutdown(timeout=25.0)
             if engine is not None:
                 engine.shutdown()
             if analyst is not None:
