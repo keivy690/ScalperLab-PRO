@@ -4,6 +4,7 @@
   const TOKEN = document.querySelector('meta[name="app-token"]')?.content || "";
   const state = { snapshot: null, strategyFilter: "all", research: [], marketWatch: null,
     marketWatchTerminal: null, marketWatchLoading: false, selectedAnalystSymbols: null,
+    selectedSrSymbols: null,
     dashboardShowAll: false, logFilter: "all" };
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -535,17 +536,31 @@
   }
 
   function renderSrSymbolOptions() {
-    const items = state.marketWatch?.available ? (state.marketWatch.items || []).filter((item) => item.broker_symbol) : [];
-    const first = $("#sr-symbol-1"), second = $("#sr-symbol-2");
-    if (!first || !second) return;
-    const previousFirst = first.value || state.snapshot?.sr_research?.symbols?.[0] || "";
-    const previousSecond = second.value || state.snapshot?.sr_research?.symbols?.[1] || "";
+    const catalog = state.marketWatch;
+    const items = catalog?.available ? (catalog.items || []).filter((item) => item.broker_symbol) : [];
+    const host = $("#sr-symbols");
+    if (!host) return;
+    if (state.selectedSrSymbols === null) {
+      state.selectedSrSymbols = [...(state.snapshot?.sr_research?.symbols || [])];
+    }
+    const selected = new Set(state.selectedSrSymbols);
+    const filter = $("#sr-symbol-search").value.trim().toLocaleLowerCase("pt-BR");
+    const visible = items.filter((item) =>
+      `${item.broker_symbol} ${item.asset_class || ""} ${item.base || ""} ${item.quote || ""}`.toLocaleLowerCase("pt-BR").includes(filter));
+    if (!catalog?.available) {
+      host.innerHTML = `<div class="empty-card">${escapeHtml(catalog?.detail || "Carregando símbolos do MT5…")}</div>`;
+    } else {
+      host.innerHTML = visible.length ? visible.map((item) =>
+        `<label class="symbol-picker-item" title="${escapeHtml(item.broker_symbol)} · ${item.trade_enabled ? "negociação habilitada" : "somente leitura"}"><input type="checkbox" value="${escapeHtml(item.broker_symbol)}" ${selected.has(item.broker_symbol) ? "checked" : ""} ${item.trade_enabled ? "" : "disabled"}><span>${escapeHtml(item.broker_symbol)}</span><small>${item.trade_enabled ? "trade" : "leitura"}</small></label>`
+      ).join("") : '<div class="empty-card">Nenhum ativo corresponde ao filtro.</div>';
+    }
+    const tradable = items.filter((item) => item.trade_enabled);
+    const currentNames = new Set(tradable.map((item) => item.broker_symbol));
+    const missing = state.selectedSrSymbols.filter((name) => !currentNames.has(name));
+    $("#sr-symbol-status").textContent = catalog?.available
+      ? `${selected.size} selecionado(s) de ${tradable.length} negociável(is) no MT5.${missing.length ? ` Indisponíveis nesta sessão: ${missing.join(", ")}.` : ""}`
+      : "O catálogo de ativos do MT5 está indisponível.";
     const options = items.map((item) => `<option value="${escapeHtml(item.broker_symbol)}" ${item.trade_enabled ? "" : "disabled"}>${escapeHtml(item.broker_symbol)}${item.trade_enabled ? "" : " · somente leitura"}</option>`).join("");
-    first.innerHTML = '<option value="">Selecione um ativo</option>' + options;
-    second.innerHTML = '<option value="">Nenhum</option>' + options;
-    first.value = items.some((item) => item.broker_symbol === previousFirst && item.trade_enabled) ? previousFirst : "";
-    second.value = items.some((item) => item.broker_symbol === previousSecond && item.trade_enabled) ? previousSecond : "";
-    first.disabled = second.disabled = !state.marketWatch?.available;
     const replay = $("#sr-replay-symbol");
     const replayPrevious = replay.value;
     replay.innerHTML = '<option value="">Selecione um ativo</option>' + options;
@@ -560,14 +575,24 @@
     const conflict = Boolean(state.snapshot?.analyst?.state?.running || state.snapshot?.engine?.state?.running);
     const badge = $("#sr-status");
     if (!badge) return;
+    if (state.selectedSrSymbols === null || (running &&
+        JSON.stringify(state.selectedSrSymbols) !== JSON.stringify(research.symbols || []))) {
+      state.selectedSrSymbols = [...(research.symbols || [])];
+    }
+    const selected = state.selectedSrSymbols || [];
+    const tradable = new Set((state.marketWatch?.items || []).filter((item) => item.trade_enabled).map((item) => item.broker_symbol));
+    const validSelection = state.marketWatch?.available && selected.length > 0 && selected.every((name) => tradable.has(name));
     badge.textContent = running ? (research.mode === "demo" ? "S/R · DEMO" : "OBSERVANDO · SEM ORDENS") : busy ? "FINALIZANDO" : "PARADA";
     badge.className = `status-chip ${running ? "active" : ""}`;
-    $("#sr-start").disabled = busy || conflict || !$("#sr-symbol-1").value;
-    $("#sr-demo").disabled = busy || conflict || !$("#sr-symbol-1").value;
+    $("#sr-start").disabled = busy || conflict || !validSelection;
+    $("#sr-demo").disabled = busy || conflict || !validSelection;
     $("#sr-stop").disabled = !running;
-    $("#sr-symbol-1").disabled = $("#sr-symbol-2").disabled = busy || !state.marketWatch?.available;
+    $$("#sr-symbols input[type='checkbox']").forEach((input) => { input.disabled = busy || !tradable.has(input.value); });
+    $("#sr-select-all").disabled = $("#sr-clear-symbols").disabled = busy || !state.marketWatch?.available;
+    $("#sr-refresh").disabled = busy || state.marketWatchLoading;
+    $("#sr-symbol-search").disabled = !state.marketWatch?.available;
     $("#sr-replay-run").disabled = busy || conflict || !$("#sr-replay-symbol").value;
-    $("#sr-time-sample").disabled = busy || conflict || !$("#sr-symbol-1").value;
+    $("#sr-time-sample").disabled = busy || conflict || !validSelection;
     $("#sr-replay-saved").disabled = busy || conflict;
     $("#sr-detail").textContent = `${research.detail || "Pesquisa desligada."}${research.last_cycle_at ? ` · ${new Date(research.last_cycle_at).toLocaleTimeString("pt-BR", {hour12:false})}` : ""}${conflict && !running ? " · Pare os motores de ordens para iniciar esta pesquisa." : ""}`;
     const results = research.last_results || [];
@@ -588,9 +613,10 @@
   }
 
   async function startSrResearch(mode = "research_only") {
-    const symbols = [$("#sr-symbol-1").value, $("#sr-symbol-2").value].filter(Boolean);
-    if (!symbols.length || new Set(symbols).size !== symbols.length) {
-      toast("Selecione um ou dois ativos diferentes do Market Watch.", "error"); return;
+    const symbols = state.selectedSrSymbols || [];
+    const tradable = new Set((state.marketWatch?.items || []).filter((item) => item.trade_enabled).map((item) => item.broker_symbol));
+    if (!symbols.length || symbols.some((name) => !tradable.has(name))) {
+      toast("Selecione ativos negociáveis disponíveis no Market Watch.", "error"); return;
     }
     const confirmation = mode === "demo" ? prompt(
       `O S/R Quant poderá enviar uma ordem quando um sinal em candle M5 fechado confirmar e todos os limites de risco passarem. Conta DEMO e ativos: ${symbols.join(", ")}. Digite exatamente: INICIAR S/R SOMENTE DEMO`) : "";
@@ -609,7 +635,7 @@
   }
 
   async function collectSrTimeSample() {
-    const symbol = $("#sr-symbol-1").value;
+    const symbol = state.selectedSrSymbols?.[0];
     const button = $("#sr-time-sample");
     if (!symbol) return;
     button.disabled = true;
@@ -1509,7 +1535,24 @@
   $("#sr-demo").addEventListener("click", () => startSrResearch("demo"));
   $("#sr-stop").addEventListener("click", stopSrResearch);
   $("#sr-time-sample").addEventListener("click", collectSrTimeSample);
-  $("#sr-symbol-1").addEventListener("change", () => renderSrResearch(state.snapshot?.sr_research || {}));
+  $("#sr-refresh").addEventListener("click", () => refreshMarketWatch(true));
+  $("#sr-symbol-search").addEventListener("input", renderSrSymbolOptions);
+  $("#sr-symbols").addEventListener("change", (event) => {
+    const input = event.target.closest('input[type="checkbox"]');
+    if (!input) return;
+    const selected = new Set(state.selectedSrSymbols || []);
+    if (input.checked) selected.add(input.value); else selected.delete(input.value);
+    state.selectedSrSymbols = [...selected];
+    renderSrSymbolOptions();
+  });
+  $("#sr-select-all").addEventListener("click", () => {
+    state.selectedSrSymbols = (state.marketWatch?.items || []).filter((item) => item.trade_enabled).map((item) => item.broker_symbol);
+    renderSrSymbolOptions();
+  });
+  $("#sr-clear-symbols").addEventListener("click", () => {
+    state.selectedSrSymbols = [];
+    renderSrSymbolOptions();
+  });
   $("#sr-replay-symbol").addEventListener("change", () => renderSrResearch(state.snapshot?.sr_research || {}));
   $("#sr-replay-form").addEventListener("submit", runSrReplay);
   $("#sr-replay-saved").addEventListener("click", replaySavedSr);

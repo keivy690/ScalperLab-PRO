@@ -107,6 +107,30 @@ class SrQuantTests(unittest.TestCase):
         self.assertFalse(result["ok"])
         port.send_demo_analyst_order.assert_not_called()
 
+    def test_service_accepts_more_than_two_exact_market_watch_symbols(self):
+        port = MagicMock(terminal_id="test")
+        port.state.return_value = {"connected": True, "terminal": {"trade_allowed": True},
+                                   "account": {"login": "123", "server": "Broker-7",
+                                               "mode": "DEMO", "trade_allowed": True,
+                                               "trade_expert": True}}
+        port.validate_market_symbols.return_value = {"available": True, "valid": True}
+        symbols = ["EURUSD#", "GOLD#", "BTCUSD#", "GBPUSD#"]
+        port.market_watch_catalog.return_value = {"available": True, "items": [
+            {"broker_symbol": symbol, "trade_enabled": True} for symbol in symbols]}
+        clock = MagicMock()
+        clock.is_verified.return_value = True
+        risk = MagicMock()
+        risk.daily_check.return_value = {"ok": True}
+        service = SrResearchService(MagicMock(), port, clock_service=clock,
+                                    risk_settings=risk)
+        with patch("scalperlab.sr_quant.service.threading.Thread"):
+            result = service.start(symbols, "demo", "INICIAR S/R SOMENTE DEMO")
+        self.assertTrue(result["ok"])
+        self.assertEqual(service.snapshot()["symbols"], symbols)
+        port.validate_market_symbols.assert_called_once_with(symbols)
+        port.arm_order_engine.assert_called_once_with(
+            "sr_quant", "DEMO", "123@Broker-7")
+
     def test_live_broker_time_evaluates_without_claiming_historical_utc(self):
         offset = 10800
         tick_time = self.decision_time

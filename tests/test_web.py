@@ -85,7 +85,7 @@ class WebTests(unittest.TestCase):
     def test_sr_research_routes_require_token_and_start_only_when_motors_stopped(self):
         page = self.client.get("/", headers=self.headers)
         self.assertEqual(page.status_code, 200)
-        self.assertIn(b'id="sr-symbol-1"', page.data)
+        self.assertIn(b'id="sr-symbols"', page.data)
         self.assertIn(b'id="sr-time-sample"', page.data)
         self.assertIn(b'id="sr-replay-form"', page.data)
         self.assertEqual(self.client.get("/api/sr-quant/evaluations").status_code, 403)

@@ -1,12 +1,12 @@
 # S/R Quant em DEMO — 30/09/2026
 
-O S/R Quant agora pode analisar e enviar ordens **somente à conta DEMO**, após início manual e confirmação textual própria. Ele começa parado a cada abertura. As três regras experimentais usam H1, M15 e M5 fechados: pullback em tendência, rompimento com reteste e falso rompimento lateral. A seleção de até dois ativos vem do Market Watch; símbolos e sufixos do broker são preservados.
+O S/R Quant agora pode analisar e enviar ordens **somente à conta DEMO**, após início manual e confirmação textual própria. Ele começa parado a cada abertura. As três regras experimentais usam H1, M15 e M5 fechados: pullback em tendência, rompimento com reteste e falso rompimento lateral. O usuário pode selecionar qualquer quantidade de ativos negociáveis recebidos do Market Watch; símbolos e sufixos do broker são preservados. Cada ativo é avaliado individualmente, e o tempo de cada ciclo aumenta conforme a quantidade selecionada.
 
 ## Como usar
 
 1. Abra o MT5 DEMO, confirme que a negociação automática está habilitada e que ClockService publica dados recentes.
 2. Em **Risco e segurança**, valide o horário UTC e configure lote, risco por operação, reserva de margem e limite diário na aba **Configurações**. O S/R usa o perfil persistido de **Estratégias**.
-3. Pare o Analista e o motor de estratégias. No painel S/R, selecione um ou dois ativos e clique em **Iniciar execução DEMO**. Leia a confirmação e digite `INICIAR S/R SOMENTE DEMO`.
+3. Pare o Analista e o motor de estratégias. No painel S/R, marque os ativos desejados do Market Watch ou use **Selecionar todos** e clique em **Iniciar execução DEMO**. Leia a confirmação e digite `INICIAR S/R SOMENTE DEMO`.
 4. Acompanhe os estados por ativo. **DEMO armado** significa que o motor pode tentar uma ordem se houver sinal; **CONFIRMADA_MT5** exige posição correlacionada com stop e alvo no terminal. Se não houver sinal, o estado será aguardar ou sem sinal elegível.
 5. Use **Parar S/R** para impedir novas entradas. Isso não fecha posições. **Parada de emergência** interrompe os motores e aciona o fluxo de fechamento conforme a conta e a confirmação.
 

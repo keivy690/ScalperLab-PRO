@@ -46,8 +46,8 @@ class SrResearchService:
               confirmation: str = "") -> dict[str, Any]:
         if mode not in {"research_only", "demo"}:
             return {"ok": False, "detail": "Modo S/R inválido; use observação ou DEMO."}
-        if not isinstance(symbols, list) or not 1 <= len(symbols) <= 2:
-            return {"ok": False, "detail": "Selecione um ou dois ativos do Market Watch."}
+        if not isinstance(symbols, list) or not symbols:
+            return {"ok": False, "detail": "Selecione ao menos um ativo do Market Watch."}
         if any(not isinstance(item, str) or not item.strip() for item in symbols):
             return {"ok": False, "detail": "Símbolo inválido."}
         selected = list(dict.fromkeys(item.strip() for item in symbols))
