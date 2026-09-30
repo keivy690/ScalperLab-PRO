@@ -14,6 +14,7 @@ _ORDER_ACTIONS = {
     "send_real_strategy_order",
     "send_demo_analyst_order",
     "send_real_analyst_order",
+    "send_demo_sr_order",
     "place_demo_smoke_order",
     "close_demo_position",
     "close_real_position",
@@ -100,6 +101,11 @@ class AuditedTradingPort:
                 "max_spread",
                 "min_reward_risk",
             ),
+            "send_demo_sr_order": (
+                "symbol", "side", "volume", "stop", "target",
+                "expected_account_fingerprint", "risk_cash",
+                "max_spread", "min_reward_risk",
+            ),
             "close_demo_position": ("ticket", "confirmation", "expected_account_fingerprint"),
             "close_real_position": ("ticket", "confirmation", "expected_account_fingerprint"),
             "place_demo_smoke_order": (),
@@ -150,7 +156,7 @@ class AuditedTradingPort:
                 6
                 if "strategy_order" in method
                 else 5
-                if "analyst_order" in method
+                if "analyst_order" in method or "sr_order" in method
                 else 2
                 if method in {"close_demo_position", "close_real_position"}
                 else None
@@ -196,7 +202,10 @@ class AuditedTradingPort:
                     "risk_cash": order["risk_cash"], "risk_policy": order.get("risk_policy")})
             except KeyError:
                 return {"ok": False, "detail": "Intenção de ordem incompleta."}
-        if self.risk_settings and method in {"send_demo_strategy_order", "send_real_strategy_order", "send_demo_analyst_order", "send_real_analyst_order"}:
+        if self.risk_settings and method in {
+                "send_demo_strategy_order", "send_real_strategy_order",
+                "send_demo_analyst_order", "send_real_analyst_order",
+                "send_demo_sr_order"}:
             engine = "analyst" if "analyst" in method else "strategy"
             account = self.connector.state().get("account") or {}
             daily = self.risk_settings.daily_check(self.connector, account)
@@ -207,7 +216,7 @@ class AuditedTradingPort:
             if requested_policy != policy:
                 return {"ok": False, "blocked": True, "detail": "Perfil de risco mudou antes do envio; sinal descartado."}
             budget = min(self.risk_settings.budget(engine, account), daily["remaining_cash"])
-            risk_index = 6 if engine == "analyst" else 7
+            risk_index = 6 if method == "send_demo_sr_order" or engine == "analyst" else 7
             args_list = list(args)
             if len(args_list) > risk_index:
                 args_list[risk_index] = min(float(args_list[risk_index]), budget)

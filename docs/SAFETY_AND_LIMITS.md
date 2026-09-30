@@ -1,5 +1,7 @@
 # Segurança, operação e limitações
 
+**Atualização de 30/09/2026:** o S/R Quant tem execução DEMO opcional e desligada por padrão. Usa o mesmo perfil de risco de Estratégias, confirmação própria, UTC e conta DEMO, armamento exclusivo, pré-verificação e auditoria; o replay permanece somente leitura. Consulte [S/R Quant em DEMO](SR_QUANT_DEMO_2026-09-30.md). As descrições históricas abaixo podem refletir a versão anterior.
+
 **Revisão:** 29/09/2026. Esta política descreve a branch `feature/sr-quant-engine`; consulte [ESTADO_ATUAL.md](ESTADO_ATUAL.md) para a evidência observada e não atribua estas funções a um pacote antigo sem conferir o manifesto.
 
 - Conexão MT5 é somente leitura por padrão. O aplicativo não guarda senha do terminal.

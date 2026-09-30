@@ -133,7 +133,9 @@ def create_app(*, database: Database | None = None, mt5: MT5Gateway | None = Non
         app.extensions["scalper_db"], app.extensions["scalper_mt5"],
         clock_service=app.extensions["scalper_system_clock"], risk_settings=risk_settings)
     app.extensions["scalper_sr_research"] = SrResearchService(
-        app.extensions["scalper_db"], app.extensions["scalper_mt5"])
+        app.extensions["scalper_db"], app.extensions["scalper_mt5"],
+        clock_service=app.extensions["scalper_system_clock"],
+        risk_settings=risk_settings)
 
     @app.before_request
     def protect_local_api():
@@ -230,8 +232,9 @@ def create_app(*, database: Database | None = None, mt5: MT5Gateway | None = Non
         if request.method == "GET":
             return jsonify(risk_settings.snapshot())
         if (app.extensions["scalper_analyst"].snapshot()["state"].get("running")
-                or app.extensions["scalper_engine"].snapshot()["state"].get("running")):
-            return jsonify(ok=False, detail="Pare os dois motores antes de salvar lote e risco."), 409
+                or app.extensions["scalper_engine"].snapshot()["state"].get("running")
+                or app.extensions["scalper_sr_research"].snapshot()["busy"]):
+            return jsonify(ok=False, detail="Pare os motores antes de salvar lote e risco."), 409
         data = _json_body() or {}
         try:
             config = risk_settings.save(data.get("engine"), data.get("profile"), data.get("daily_loss_limit_pct"))
@@ -286,7 +289,8 @@ def create_app(*, database: Database | None = None, mt5: MT5Gateway | None = Non
         engine_state = app.extensions["scalper_engine"].snapshot()["state"]
         active_execution = any(
             runtime.get("running") and runtime.get("mode") in {"demo", "real"}
-            for runtime in (analyst_state, engine_state)
+            for runtime in (analyst_state, engine_state,
+                            app.extensions["scalper_sr_research"].snapshot())
         )
         if active_execution:
             return jsonify(status="blocked", detail=(
@@ -419,7 +423,9 @@ def create_app(*, database: Database | None = None, mt5: MT5Gateway | None = Non
                 or app.extensions["scalper_engine"].snapshot()["state"].get("running")):
             return jsonify(ok=False, detail="Pare os motores antes de iniciar a pesquisa S/R; o conector MT5 é compartilhado."), 409
         data = _json_body() or {}
-        result = app.extensions["scalper_sr_research"].start(data.get("symbols"))
+        result = app.extensions["scalper_sr_research"].start(
+            data.get("symbols"), _bounded(data.get("mode") or "research_only", 20),
+            _bounded(data.get("confirmation"), 80))
         app.extensions["scalper_db"].add_log(
             "INFO" if result["ok"] else "WARN", f"Pesquisa S/R: {result['detail']}")
         return jsonify(result), (200 if result["ok"] else 409)
@@ -904,7 +910,11 @@ def create_app(*, database: Database | None = None, mt5: MT5Gateway | None = Non
         result = (gateway.emergency_stop_real(confirmation)
                   if confirmation == "FECHAR TODAS AS POSIÇÕES REAL"
                   else gateway.emergency_stop_demo(confirmation))
-        result["engine_stopped"] = not app.extensions["scalper_engine"].snapshot()["state"]["running"]
+        result["engine_stopped"] = not any((
+            app.extensions["scalper_engine"].snapshot()["state"]["running"],
+            app.extensions["scalper_analyst"].snapshot()["state"]["running"],
+            app.extensions["scalper_sr_research"].snapshot()["busy"],
+        ))
         if not result["engine_stopped"]:
             result["ok"] = False
             result["status"] = "partial"

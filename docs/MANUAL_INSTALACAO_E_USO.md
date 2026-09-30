@@ -278,6 +278,8 @@ Informações sobre chaves, procedência e validação de arquivos ficam no grup
 
 ## Pesquisa de zonas S/R Quant (29/09/2026)
 
+**Atualização de 30/09/2026:** há agora **Iniciar observação** e **Iniciar execução DEMO**. O segundo exige conta DEMO, UTC validado, perfil de risco e a frase `INICIAR S/R SOMENTE DEMO`. A observação continua sem ordens; o replay continua exigindo UTC histórico comprovado. Consulte [o procedimento e os limites atualizados](SR_QUANT_DEMO_2026-09-30.md). As instruções datadas abaixo descrevem a entrega anterior.
+
 1. Abra **Risco e segurança → Pesquisa de zonas S/R**. Pare o Analista e o motor de estratégias antes de iniciar; eles compartilham o conector MT5.
 2. Escolha um ou dois símbolos exatos trazidos do Market Watch e clique em **Iniciar pesquisa**. O módulo lê H1, M15 e M5 fechados, sem enviar ordens. Ele começa desligado após cada reinício.
 3. Leia por ativo o regime, as zonas, os candidatos e os motivos de rejeição. Um candidato indica apenas uma hipótese em pesquisa; não equivale a uma ordem solicitada ou executada.

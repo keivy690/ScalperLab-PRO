@@ -8,12 +8,70 @@ from typing import Any
 
 from ..mt5_time import MT5_TIMEFRAME_SECONDS
 from ..trading.ports import TradingPort
+from .time_archive import examine_sample
 
 RULE_VERSION = "sr-quant-research-v1"
 FRAMES = ("H1", "M15", "M5")
 FRAME_COUNTS = {"H1": 260, "M15": 260, "M5": 300}
 MIN_BARS = {"H1": 215, "M15": 60, "M5": 30}
 MAX_SPREAD_ATR_M5 = 0.08  # Research hypothesis; not a universal broker limit.
+
+
+def read_live_broker_bundle(port: TradingPort, symbol: str) -> dict[str, Any]:
+    """Anchor raw broker-time H1/M15/M5 to a verified current M1/tick.
+
+    Historical bars stay in the broker's time domain for causal indicators. This
+    does not assert an unproved historical UTC offset and cannot feed replay.
+    """
+    started = time.monotonic()
+    sample = port.sr_raw_time_sample(symbol, max(FRAME_COUNTS.values()))
+    if not sample.get("ok") or sample.get("symbol") != symbol:
+        return {"ok": False, "symbol": symbol,
+                "code": sample.get("code") or "raw_sample_unavailable",
+                "detail": sample.get("detail") or "Leitura bruta MT5 indisponível."}
+    anchor = examine_sample(sample)
+    if not anchor.get("ok"):
+        return {"ok": False, "symbol": symbol,
+                "code": anchor.get("code") or "broker_time_unverified",
+                "detail": "Candle atual e tick UTC não confirmaram a mesma base temporal."}
+    account = sample.get("account") or {}
+    if not account.get("login") or not account.get("server"):
+        return {"ok": False, "symbol": symbol, "code": "account_unavailable",
+                "detail": "Identidade da conta MT5 indisponível."}
+    frames = {frame: list(sample["frames"][frame]["closed"][-FRAME_COUNTS[frame]:])
+              for frame in FRAMES}
+    if any(not frames[frame] for frame in FRAMES):
+        return {"ok": False, "symbol": symbol, "code": "history_unavailable",
+                "detail": "Histórico H1/M15/M5 indisponível."}
+    offset = int(anchor["bar_offset_seconds"])
+    return {"ok": True, "symbol": symbol, "frames": frames,
+            "contract": sample.get("contract") or {}, "tick": sample["tick"],
+            "account": account, "terminal_id": sample.get("terminal_id"),
+            "raw_sample": sample, "decision_time_raw": int(sample["tick"]["time"]) + offset,
+            "bar_offset_seconds": offset,
+            "time_normalization": {"basis": "broker_raw_for_causal_indicators",
+                                   "historical_timezone_verified": False,
+                                   "current_m1_anchor_verified": True,
+                                   "current_bar_offset_seconds": offset,
+                                   "sample_sha256": anchor["sample_sha256"]},
+            "connector_diagnostics": {"calls": 1,
+                                      "elapsed_seconds": round(time.monotonic() - started, 3)}}
+
+
+def evaluate_live_broker_bundle(bundle: dict[str, Any]) -> dict[str, Any]:
+    """Convert only recent decision timestamps back to UTC for audit/deduping."""
+    offset = int(bundle["bar_offset_seconds"])
+    result = evaluate_bundle(bundle, decision_time=int(bundle["decision_time_raw"]))
+    result["decision_time_utc"] = int(bundle["tick"]["time"])
+    result["frame_last_closed"] = {
+        frame: (raw - offset if raw is not None else None)
+        for frame, raw in result["frame_last_closed"].items()}
+    for candidate in result.get("candidates", []):
+        candidate["signal_bar_open_utc"] -= offset
+    result["time_basis"] = "broker_raw_history_current_utc_anchor"
+    result["historical_timezone_verified"] = False
+    result["bar_offset_applied_to_recent_signal_seconds"] = offset
+    return result
 
 
 def read_live_bundle(port: TradingPort, symbol: str, *,

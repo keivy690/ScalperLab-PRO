@@ -44,7 +44,9 @@ class SrTimeArchiveTests(unittest.TestCase):
             def terminal_info(self):
                 return SimpleNamespace(connected=True, data_path="terminal", build=5400)
             def symbol_info(self, name):
-                return SimpleNamespace(name=name, visible=True)
+                return SimpleNamespace(name=name, visible=True, point=0.00001,
+                                       digits=5, volume_min=0.01, volume_step=0.01,
+                                       trade_mode=4)
             def copy_rates_from_pos(self, _symbol, timeframe, _start, _count):
                 frame = {1: "M1", 5: "M5", 15: "M15", 60: "H1"}[timeframe]
                 data = source["frames"][frame]

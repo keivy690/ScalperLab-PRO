@@ -43,6 +43,7 @@ class MT5Gateway:
         self._demo_armed_account_fingerprint: str | None = None
         self.strategy_engine_armed = False
         self.analyst_engine_armed = False
+        self.sr_quant_engine_armed = False
         self._engine_armed_mode: str | None = None
         self._engine_armed_fingerprint: str | None = None
         self.real_close_armed = False
@@ -65,10 +66,15 @@ class MT5Gateway:
 
     def arm_order_engine(self, engine: str, mode: str = "DEMO", fingerprint: str | None = None) -> bool:
         """Atomically arm one order engine for one explicitly identified account."""
-        if engine not in {"strategy", "analyst"} or mode not in {"DEMO", "REAL"} or not fingerprint:
+        if (engine not in {"strategy", "analyst", "sr_quant"}
+                or mode not in {"DEMO", "REAL"} or not fingerprint
+                or (engine == "sr_quant" and mode != "DEMO")):
             return False
         with self._trade_lock, self._lock:
-            other_armed = self.analyst_engine_armed if engine == "strategy" else self.strategy_engine_armed
+            armed = {"strategy": self.strategy_engine_armed,
+                     "analyst": self.analyst_engine_armed,
+                     "sr_quant": self.sr_quant_engine_armed}
+            other_armed = any(active for name, active in armed.items() if name != engine)
             if other_armed or (self._engine_armed_mode and
                                (self._engine_armed_mode != mode or self._engine_armed_fingerprint != fingerprint)):
                 return False
@@ -76,8 +82,10 @@ class MT5Gateway:
             self._engine_armed_fingerprint = fingerprint
             if engine == "strategy":
                 self.strategy_engine_armed = True
-            else:
+            elif engine == "analyst":
                 self.analyst_engine_armed = True
+            else:
+                self.sr_quant_engine_armed = True
             return True
 
     def disarm_order_engine(self, engine: str) -> None:
@@ -86,7 +94,10 @@ class MT5Gateway:
                 self.strategy_engine_armed = False
             elif engine == "analyst":
                 self.analyst_engine_armed = False
-            if not self.strategy_engine_armed and not self.analyst_engine_armed:
+            elif engine == "sr_quant":
+                self.sr_quant_engine_armed = False
+            if not any((self.strategy_engine_armed, self.analyst_engine_armed,
+                        self.sr_quant_engine_armed)):
                 self._engine_armed_mode = None
                 self._engine_armed_fingerprint = None
 
@@ -389,6 +400,7 @@ class MT5Gateway:
             if self._engine_armed_mode and (not terminal or not terminal.connected
                     or mode != self._engine_armed_mode or fingerprint != self._engine_armed_fingerprint):
                 self.strategy_engine_armed = self.analyst_engine_armed = False
+                self.sr_quant_engine_armed = False
                 self._engine_armed_mode = self._engine_armed_fingerprint = None
             return {
                 "connected": bool(terminal and terminal.connected), "status": "conectado" if terminal and terminal.connected else "desconectado",
@@ -649,6 +661,14 @@ class MT5Gateway:
                         "detail": "Conta ou terminal mudou durante a amostra; dados descartados."}
             return {"ok": True, "symbol": symbol_name, "terminal_id": self.terminal_id,
                     "account": {"login": str(before.login), "server": str(before.server)},
+                    "contract": {"point": float(symbol.point),
+                                 "digits": int(symbol.digits),
+                                 "trade_tick_size": float(getattr(symbol, "trade_tick_size", 0.0)),
+                                 "trade_tick_value_profit": float(getattr(symbol, "trade_tick_value_profit", 0.0)),
+                                 "trade_tick_value_loss": float(getattr(symbol, "trade_tick_value_loss", 0.0)),
+                                 "volume_min": float(symbol.volume_min),
+                                 "volume_step": float(symbol.volume_step),
+                                 "trade_mode": int(symbol.trade_mode)},
                     "terminal": {"data_path": str(getattr(terminal, "data_path", "")),
                                  "build": int(getattr(terminal, "build", 0))},
                     "captured_utc": int(time.time()), "tick": tick, "frames": frames}
@@ -775,6 +795,21 @@ class MT5Gateway:
                 max_spread=max_spread, min_reward_risk=min_reward_risk, mode="REAL",
                 correlation_id=correlation_id, risk_policy=risk_policy)
 
+    def send_demo_sr_order(self, symbol_name: str, side: str, volume: float,
+                           stop: float, target: float,
+                           expected_account_fingerprint: str | None = None,
+                           risk_cash: float | None = None,
+                           max_spread: float | None = None,
+                           min_reward_risk: float | None = None,
+                           correlation_id: str | None = None,
+                           risk_policy: dict | None = None) -> dict[str, Any]:
+        with self._trade_lock, self._lock:
+            return self._send_account_order(
+                symbol_name, side, volume, stop, target, 999,
+                expected_account_fingerprint, "sr_quant", risk_cash=risk_cash,
+                max_spread=max_spread, min_reward_risk=min_reward_risk,
+                correlation_id=correlation_id, risk_policy=risk_policy)
+
     def _send_account_order(self, symbol_name: str, side: str, volume: float,
                                   stop: float, target: float, strategy_id: int,
                                   expected_account_fingerprint: str | None,
@@ -784,7 +819,9 @@ class MT5Gateway:
                                   mode: str = "DEMO",
                                   correlation_id: str | None = None, risk_policy: dict | None = None) -> dict[str, Any]:
         symbol_name = self.resolve_broker_symbol(symbol_name)
-        armed = self.analyst_engine_armed if engine == "analyst" else self.strategy_engine_armed
+        armed = {"analyst": self.analyst_engine_armed,
+                 "strategy": self.strategy_engine_armed,
+                 "sr_quant": self.sr_quant_engine_armed}.get(engine, False)
         if not armed or self._engine_armed_mode != mode:
             return {"ok": False, "blocked": True, "detail": "Motor de execução não está armado; nenhuma ordem enviada."}
         if not expected_account_fingerprint:

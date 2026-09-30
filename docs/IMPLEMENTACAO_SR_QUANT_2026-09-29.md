@@ -1,5 +1,7 @@
 # Implementação do motor de pesquisa S/R Quant — 29/09/2026
 
+**Atualização posterior:** o modo DEMO foi adicionado em 30/09/2026. Leia [o procedimento atual](SR_QUANT_DEMO_2026-09-30.md); este documento conserva o registro da entrega original de pesquisa.
+
 **Estado:** implementado na branch como pesquisa somente leitura. Não foi incluído automaticamente no executável piloto anterior e não teve replay real aceito no servidor XMGlobal observado; veja [estado atual](ESTADO_ATUAL.md).
 
 ## Escopo entregue nesta branch

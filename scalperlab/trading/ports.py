@@ -69,6 +69,14 @@ class TradingPort(Protocol):
                                 risk_cash: float | None = None, max_spread: float | None = None,
                                 min_reward_risk: float | None = None,
                                 correlation_id: str | None = None, risk_policy: dict | None = None) -> dict[str, Any]: ...
+    def send_demo_sr_order(self, symbol_name: str, side: str, volume: float,
+                           stop: float, target: float,
+                           expected_account_fingerprint: str | None = None,
+                           risk_cash: float | None = None,
+                           max_spread: float | None = None,
+                           min_reward_risk: float | None = None,
+                           correlation_id: str | None = None,
+                           risk_policy: dict | None = None) -> dict[str, Any]: ...
     def arm_order_engine(self, engine: str, mode: str = "DEMO",
                          fingerprint: str | None = None) -> bool: ...
     def disarm_order_engine(self, engine: str) -> None: ...

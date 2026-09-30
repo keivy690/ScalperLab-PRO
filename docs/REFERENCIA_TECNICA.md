@@ -1,5 +1,7 @@
 # Referência técnica e de manutenção
 
+**Atualização de 30/09/2026:** `POST /api/sr-quant/start` aceita `mode=research_only` ou `mode=demo` com a confirmação `INICIAR S/R SOMENTE DEMO`. O modo DEMO passa pelo gateway auditado (`send_demo_sr_order`) e a tabela `sr_order_signals`; observação, amostragem e replay não enviam ordens. Leia [a atualização S/R DEMO](SR_QUANT_DEMO_2026-09-30.md). As linhas históricas abaixo ainda descrevem o modo antigo.
+
 **Código consultado:** branch `feature/sr-quant-engine`, 29/09/2026. A interface usa estas rotas locais; não são uma API pública de rede. Para fluxo de usuário, consulte o [manual](MANUAL_INSTALACAO_E_USO.md); para estado de validação, [ESTADO_ATUAL.md](ESTADO_ATUAL.md).
 
 ## Execução e fronteiras

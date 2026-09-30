@@ -1,5 +1,7 @@
 # Estado atual do ScalperLab PRO
 
+**Atualização de 30/09/2026:** o S/R Quant ganhou execução DEMO opcional, desligada por padrão. Leia [a atualização operacional](SR_QUANT_DEMO_2026-09-30.md) antes das descrições históricas abaixo, que registram o estado anterior de pesquisa somente leitura. O replay permanece bloqueado sem prova do horário histórico do broker.
+
 **Referência:** código da branch `feature/sr-quant-engine` em 29/09/2026. Este documento separa capacidade implementada, evidência observada no terminal de desenvolvimento e trabalho pendente. O executável piloto anteriormente gerado pode representar outra revisão; consulte seu `BUILD-MANIFEST.json` antes de atribuir-lhe uma função desta branch.
 
 ## Mapa de capacidades

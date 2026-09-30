@@ -24,7 +24,7 @@ O conector de mercado e ordens usa a biblioteca Python `MetaTrader5` e o termina
 
 - **Analista de mercado:** regra experimental técnica e quantitativa de pullback na SMA 21. Observação não envia ordens; DEMO e REAL têm caminhos de envio condicionados a confirmação e preflight. Disponibilidade técnica de REAL não é homologação.
 - **Estratégias cadastradas:** cinco adaptações declarativas executáveis; arquivos `.mq5`, `.py` e `.txt` importados são material de revisão e não são executados automaticamente.
-- **Pesquisa S/R Quant:** três famílias de hipóteses em H1/M15/M5, avaliação persistida e replay cronológico, sempre `research_only` e **sem caminho de ordens**. No MT5 XMGlobal consultado em 29/09/2026, o histórico ainda não tinha a base UTC verificada; pesquisa e replay reais ficaram bloqueados por qualidade temporal.
+- **S/R Quant:** três regras H1/M15/M5, observação e execução DEMO separadas, com auditoria, risco e reconciliação pelo conector. A decisão ao vivo usa horário bruto do broker ancorado em M1/tick atuais; replay histórico continua exigindo UTC histórico comprovado. Regra experimental, sem validação estatística.
 - **Pesquisa pública e IA opcional:** GitHub e feeds; Brave, YouTube e resumo via OpenAI dependem de chaves de ambiente. O calendário MT5 é contexto parcial; notícias e séries macro estruturadas não estão integradas ao gatilho atual.
 - **Risco:** perfis separados de Analista e Estratégias para dimensionamento por percentual, valor ou lote fixo com teto, reserva de margem e limite diário compartilhado. O teste de integração DEMO permanece limitado a 0,01 lote.
 

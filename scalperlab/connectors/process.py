@@ -41,7 +41,7 @@ _REMOTE_METHODS = {
     "validate_market_symbols", "strategy_market_data", "historical_market_data", "sr_raw_time_sample", "current_tick", "economic_calendar",
     "risk_volume", "arm_order_engine", "disarm_order_engine",
     "send_demo_strategy_order", "send_real_strategy_order",
-    "send_demo_analyst_order", "send_real_analyst_order", "arm_demo",
+    "send_demo_analyst_order", "send_real_analyst_order", "send_demo_sr_order", "arm_demo",
     "arm_real_closing", "place_demo_smoke_order", "close_demo_position",
     "close_real_position", "emergency_stop_demo", "emergency_stop_real",
     "set_emergency_action", "update_emergency_action",
@@ -49,7 +49,7 @@ _REMOTE_METHODS = {
 
 _TRADE_ACTION_METHODS = {
     "submit_order", "send_demo_strategy_order", "send_real_strategy_order",
-    "send_demo_analyst_order", "send_real_analyst_order",
+    "send_demo_analyst_order", "send_real_analyst_order", "send_demo_sr_order",
     "place_demo_smoke_order", "close_demo_position", "close_real_position",
     "emergency_stop_demo", "emergency_stop_real",
 }
@@ -82,6 +82,7 @@ def _connector_worker(connection: Connection, config: Any,
                     if previous_fingerprint and fingerprint != previous_fingerprint:
                         connector.disarm_order_engine("strategy")
                         connector.disarm_order_engine("analyst")
+                        connector.disarm_order_engine("sr_quant")
                     if fingerprint:
                         previous_fingerprint = fingerprint
                 connection.send((request_id, True, result))

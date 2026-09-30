@@ -76,6 +76,8 @@ O estado operacional apresentado no cabeçalho e no KPI do painel é derivado em
 
 ## Pesquisa S/R Quant e persistência
 
+**Atualização de 30/09/2026:** o S/R Quant também usa `TradingPort` para enviar em DEMO após confirmação explícita, armamento exclusivo, risco, UTC, pré-envio e reconciliação. A análise ao vivo usa H1/M15/M5 brutos no horário do broker e a âncora M1/tick atual; o replay mantém o requisito de UTC histórico. `sr_order_signals` deduplica intenções por conta, regra e candle. Consulte [a atualização operacional](SR_QUANT_DEMO_2026-09-30.md); os parágrafos abaixo descrevem o desenho anterior.
+
 `SrResearchService` inicia somente por ação do usuário, aceita no máximo dois nomes exatos do Market Watch e fica desligado após reinício. A API impede pesquisa simultânea com Analista ou motor declarativo ativos. H1/M15 são reutilizados até o próximo fechamento esperado; M5 e tick são relidos por ciclo. Falha de base temporal ou dado incompleto gera evento de qualidade, não sinal alternativo.
 
 `sr_evaluations` guarda avaliações por conta, símbolo, versão e candle M5; `sr_data_events` guarda falhas de qualidade; `sr_replay_runs` guarda entradas, premissas, relatório e hash para reprodução offline. A migração SQLite é aditiva. O replay chama o mesmo avaliador e separa desenvolvimento/holdout 70/30, com aproximação de custos e execução em OHLC. Não acessa o gateway de ordens.

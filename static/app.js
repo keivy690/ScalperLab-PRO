@@ -85,12 +85,12 @@
     if (runtime.running) {
       const mode = runtime.mode || "observacao";
       const executionMode = ["demo", "real"].includes(mode);
-      const modeLabel = mode === "observacao" ? "OBSERVAÇÃO" : mode.toUpperCase();
+      const modeLabel = ["observacao", "research_only"].includes(mode) ? "OBSERVAÇÃO" : mode.toUpperCase();
       return {
         running: true, mode,
         header: name.toUpperCase() + " · " + (executionMode ? "EXECUÇÃO " : "") + modeLabel,
-        metric: mode === "observacao" ? "Observação ativa" : name + " · " + modeLabel,
-        badge: mode === "observacao" ? "OBSERVANDO" : modeLabel + " AUTOMÁTICO",
+        metric: ["observacao", "research_only"].includes(mode) ? "Observação ativa" : name + " · " + modeLabel,
+        badge: ["observacao", "research_only"].includes(mode) ? "OBSERVANDO" : modeLabel + " AUTOMÁTICO",
         detail: runtime.detail || name + " em " + modeLabel.toLowerCase() + ".",
         kind: executionMode ? "approved" : "review",
       };
@@ -111,7 +111,8 @@
   function operationalStatus(snapshot = {}) {
     const analyst = runtimeDescriptor("Analista", snapshot.analyst?.state || {});
     const strategies = runtimeDescriptor("Estratégias", snapshot.engine?.state || {});
-    const active = [analyst, strategies].filter((runtime) => runtime.running);
+    const sr = runtimeDescriptor("S/R Quant", snapshot.sr_research || {});
+    const active = [analyst, strategies, sr].filter((runtime) => runtime.running);
     const blocked = [analyst, strategies].filter((runtime) => runtime.blocked);
     const represented = [...active, ...blocked];
     const realAccount = ["REAL", "CONTEST"].includes(snapshot.mt5?.account?.mode);
@@ -207,7 +208,8 @@
     if (!node || !button) return;
     const analyst = state.snapshot?.analyst?.state || {};
     const engine = state.snapshot?.engine?.state || {};
-    const executionActive = [analyst, engine].some((runtime) =>
+    const sr = state.snapshot?.sr_research || {};
+    const executionActive = [analyst, engine, sr].some((runtime) =>
       runtime.running && ["demo", "real"].includes(runtime.mode));
     const stateNames = {
       not_checked: "not-checked",
@@ -527,7 +529,7 @@
       `<option value="${escapeHtml(item.broker_symbol)}" ${item.broker_symbol === preferred ? "selected" : ""} ${item.trade_enabled ? "" : "disabled"}>${escapeHtml(item.broker_symbol)}${item.trade_enabled ? "" : " · somente leitura"}</option>`
     ).join("");
     select.disabled = !items.some((item) => item.trade_enabled);
-    const active = Boolean(state.snapshot?.analyst?.state?.running || state.snapshot?.engine?.state?.running);
+    const active = Boolean(state.snapshot?.analyst?.state?.running || state.snapshot?.engine?.state?.running || state.snapshot?.sr_research?.busy);
     $("#replay-run").disabled = select.disabled || !select.value || active;
     if (active) $("#replay-status").textContent = "Pare o Analista e o motor de estratégias antes do replay; o conector é compartilhado.";
   }
@@ -558,9 +560,10 @@
     const conflict = Boolean(state.snapshot?.analyst?.state?.running || state.snapshot?.engine?.state?.running);
     const badge = $("#sr-status");
     if (!badge) return;
-    badge.textContent = running ? "PESQUISANDO · SEM ORDENS" : busy ? "FINALIZANDO" : "PARADA";
+    badge.textContent = running ? (research.mode === "demo" ? "S/R · DEMO" : "OBSERVANDO · SEM ORDENS") : busy ? "FINALIZANDO" : "PARADA";
     badge.className = `status-chip ${running ? "active" : ""}`;
     $("#sr-start").disabled = busy || conflict || !$("#sr-symbol-1").value;
+    $("#sr-demo").disabled = busy || conflict || !$("#sr-symbol-1").value;
     $("#sr-stop").disabled = !running;
     $("#sr-symbol-1").disabled = $("#sr-symbol-2").disabled = busy || !state.marketWatch?.available;
     $("#sr-replay-run").disabled = busy || conflict || !$("#sr-replay-symbol").value;
@@ -573,7 +576,7 @@
       const candidates = (item.candidates || []).map((candidate) => `${candidate.strategy} ${candidate.side} (${candidate.status})`).join(" · ") || "Nenhum candidato";
       const reasons = (item.rejections || []).map((reason) => reason.code).join(" · ") || item.detail || "Sem bloqueios registrados";
       const filters = Object.entries(item.filter_counts || {}).map(([name, count]) => `${name}: ${count}`).join(" · ");
-      return `<article class="sr-result"><div class="sr-result-head"><strong>${escapeHtml(item.symbol || "Ativo")}</strong><span>${escapeHtml(item.status || "—")}</span></div><div class="sr-result-grid"><span>Regime <b>${escapeHtml(direction)}</b></span><span>Zonas <b>${number(item.zones_found || 0, 0)}</b></span><span>Spread/ATR M5 <b>${item.spread_to_atr_m5 == null ? "—" : number(item.spread_to_atr_m5, 3)}</b></span><span>Último M5 <b>${item.frame_last_closed?.M5 ? escapeHtml(new Date(item.frame_last_closed.M5 * 1000).toLocaleString("pt-BR")) : "—"}</b></span></div><p><b>Hipóteses:</b> ${escapeHtml(candidates)}</p><p><b>Motivos:</b> ${escapeHtml(reasons)}</p><small>${escapeHtml(filters)}</small></article>`;
+      return `<article class="sr-result"><div class="sr-result-head"><strong>${escapeHtml(item.symbol || "Ativo")}</strong><span>${escapeHtml(item.status || "—")}</span></div><div class="sr-result-grid"><span>Regime <b>${escapeHtml(direction)}</b></span><span>Zonas <b>${number(item.zones_found || 0, 0)}</b></span><span>Spread/ATR M5 <b>${item.spread_to_atr_m5 == null ? "—" : number(item.spread_to_atr_m5, 3)}</b></span><span>Último M5 <b>${item.frame_last_closed?.M5 ? escapeHtml(new Date(item.frame_last_closed.M5 * 1000).toLocaleString("pt-BR")) : "—"}</b></span></div><p><b>Hipóteses:</b> ${escapeHtml(candidates)}</p><p><b>Motivos:</b> ${escapeHtml(reasons)}</p>${item.mode === "demo" ? `<p><b>Execução DEMO:</b> ${escapeHtml(executionStatusLabel(item.execution_status || "SEM_SINAL_ELEGIVEL"))}${item.execution?.ticket ? ` · ticket ${escapeHtml(item.execution.ticket)}` : ""}</p>` : ""}<small>${escapeHtml(filters)}</small></article>`;
     }).join("") : '<div class="empty-card">Nenhuma avaliação desta sessão.</div>';
   }
 
@@ -584,13 +587,16 @@
     host.innerHTML = items.length ? `<strong>Últimos bloqueios de dados</strong>${items.slice(0, 5).map((item) => `<div><span>${escapeHtml(item.symbol)} · ${escapeHtml(item.code)}</span><small>${escapeHtml(item.detail)} · ${escapeHtml(item.created_at)}</small></div>`).join("")}` : "";
   }
 
-  async function startSrResearch() {
+  async function startSrResearch(mode = "research_only") {
     const symbols = [$("#sr-symbol-1").value, $("#sr-symbol-2").value].filter(Boolean);
     if (!symbols.length || new Set(symbols).size !== symbols.length) {
       toast("Selecione um ou dois ativos diferentes do Market Watch.", "error"); return;
     }
+    const confirmation = mode === "demo" ? prompt(
+      `O S/R Quant poderá enviar uma ordem quando um sinal em candle M5 fechado confirmar e todos os limites de risco passarem. Conta DEMO e ativos: ${symbols.join(", ")}. Digite exatamente: INICIAR S/R SOMENTE DEMO`) : "";
+    if (mode === "demo" && confirmation !== "INICIAR S/R SOMENTE DEMO") return;
     try {
-      const result = await api("/api/sr-quant/start", {method:"POST", body:JSON.stringify({symbols}), timeoutMs:15000});
+      const result = await api("/api/sr-quant/start", {method:"POST", body:JSON.stringify({symbols, mode, confirmation}), timeoutMs:15000});
       toast(result.detail, "success"); await refresh();
     } catch (error) { toast(error.message, "error"); }
   }
@@ -1075,7 +1081,7 @@
       : bridge?.detail || "Relógio indisponível; conecte o MT5 e inicie ScalperLabClockService.";
     const form = $("#risk-settings-form");
     if (!form.dataset.initialized) loadRiskForm();
-    const running = snapshot.analyst?.state?.running || snapshot.engine?.state?.running;
+    const running = snapshot.analyst?.state?.running || snapshot.engine?.state?.running || snapshot.sr_research?.busy;
     $("#risk-settings-save").disabled = Boolean(running);
     $("#risk-settings-status").textContent = running ? "Pare os motores para salvar alterações." : form.dataset.dirty === "true" ? "Alterações ainda não salvas." : "Perfil salvo · motores precisam ser iniciados manualmente.";
     $("#risk-version").textContent = `Versão ${snapshot.risk_settings?.version || "—"}`;
@@ -1499,7 +1505,8 @@
   $("#analyst-demo").addEventListener("click", () => startAnalyst("demo"));
   $("#analyst-real").addEventListener("click", () => startAnalyst("real"));
   $("#analyst-stop").addEventListener("click", stopAnalyst);
-  $("#sr-start").addEventListener("click", startSrResearch);
+  $("#sr-start").addEventListener("click", () => startSrResearch("research_only"));
+  $("#sr-demo").addEventListener("click", () => startSrResearch("demo"));
   $("#sr-stop").addEventListener("click", stopSrResearch);
   $("#sr-time-sample").addEventListener("click", collectSrTimeSample);
   $("#sr-symbol-1").addEventListener("change", () => renderSrResearch(state.snapshot?.sr_research || {}));

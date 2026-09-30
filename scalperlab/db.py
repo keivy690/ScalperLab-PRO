@@ -172,6 +172,15 @@ class Database:
                 );
                 CREATE INDEX IF NOT EXISTS idx_sr_verified_bars_lookup
                     ON sr_verified_bars(account_sha256, symbol, timeframe, utc_open DESC);
+                CREATE TABLE IF NOT EXISTS sr_order_signals (
+                    account_sha256 TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    rule_version TEXT NOT NULL,
+                    strategy TEXT NOT NULL,
+                    signal_bar_utc INTEGER NOT NULL,
+                    reserved_at TEXT NOT NULL,
+                    PRIMARY KEY(account_sha256,symbol,rule_version,strategy,signal_bar_utc)
+                );
                 CREATE TABLE IF NOT EXISTS sr_raw_time_samples (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     account_sha256 TEXT NOT NULL,
@@ -356,6 +365,22 @@ class Database:
                 """DELETE FROM sr_evaluations WHERE rowid NOT IN
                 (SELECT rowid FROM sr_evaluations ORDER BY created_at DESC LIMIT 20000)"""
             )
+
+    def reserve_sr_order_signal(self, *, account_sha256: str, symbol: str,
+                                rule_version: str, strategy: str,
+                                signal_bar_utc: int) -> bool:
+        """At most one DEMO intent per setup and closed candle, across restarts."""
+        if (len(account_sha256) != 64 or not symbol or not rule_version
+                or not strategy or int(signal_bar_utc) <= 0):
+            raise ValueError("Identidade do sinal S/R inválida.")
+        with self.connect() as connection:
+            cursor = connection.execute(
+                """INSERT OR IGNORE INTO sr_order_signals
+                (account_sha256,symbol,rule_version,strategy,signal_bar_utc,reserved_at)
+                VALUES (?,?,?,?,?,?)""",
+                (account_sha256, symbol, rule_version, strategy,
+                 int(signal_bar_utc), now_iso()))
+        return cursor.rowcount == 1
 
     def save_sr_data_event(self, *, account_sha256: str, symbol: str,
                            code: str, detail: str) -> None:

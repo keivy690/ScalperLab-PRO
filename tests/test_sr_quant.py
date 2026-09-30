@@ -4,8 +4,10 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from scalperlab.connectors.audit import AuditedTradingPort
 from scalperlab.db import Database
-from scalperlab.sr_quant.core import evaluate_bundle, read_live_bundle
+from scalperlab.sr_quant.core import (evaluate_bundle, evaluate_live_broker_bundle,
+                                      read_live_broker_bundle, read_live_bundle)
 from scalperlab.sr_quant.replay import run_sr_replay
 from scalperlab.sr_quant.service import SrResearchService
 
@@ -104,6 +106,116 @@ class SrQuantTests(unittest.TestCase):
         result = service.start(["EURUSD#", "EURUSD#"])
         self.assertFalse(result["ok"])
         port.send_demo_analyst_order.assert_not_called()
+
+    def test_live_broker_time_evaluates_without_claiming_historical_utc(self):
+        offset = 10800
+        tick_time = self.decision_time
+        raw_frames = {}
+        for frame, seconds in (("H1", 3600), ("M15", 900), ("M5", 300)):
+            closed = bars(tick_time // seconds * seconds - 300 * seconds + offset,
+                          seconds, 300)
+            raw_frames[frame] = {"closed": closed,
+                                 "forming": {**closed[-1], "time": closed[-1]["time"] + seconds}}
+        raw_frames["M1"] = {"closed": [], "forming": {
+            "time": tick_time // 60 * 60 + offset}}
+        port = MagicMock()
+        port.sr_raw_time_sample.return_value = {
+            "ok": True, "symbol": "EURUSD#", "terminal_id": "test",
+            "account": {"login": "123", "server": "Broker-7"},
+            "tick": {"ok": True, "time": tick_time, "bid": 1.103,
+                     "ask": 1.10302,
+                     "time_normalization": {"basis": "UTC",
+                                            "server_utc_offset_seconds": offset}},
+            "frames": raw_frames}
+        with patch("scalperlab.sr_quant.core.examine_sample", return_value={
+                "ok": True, "bar_offset_seconds": offset, "sample_sha256": "a" * 64}):
+            bundle = read_live_broker_bundle(port, "EURUSD#")
+        self.assertTrue(bundle["ok"])
+        result = evaluate_live_broker_bundle(bundle)
+        self.assertEqual(result["status"], "EVALUATED")
+        self.assertEqual(result["decision_time_utc"], tick_time)
+        self.assertEqual(result["frame_last_closed"]["M5"],
+                         raw_frames["M5"]["closed"][-1]["time"] - offset)
+        self.assertFalse(result["historical_timezone_verified"])
+
+    def test_demo_requires_exact_confirmation_and_demo_account(self):
+        port = MagicMock(terminal_id="test")
+        port.state.return_value = {
+            "connected": True, "terminal": {"trade_allowed": True},
+            "account": {"login": "123", "server": "Broker-7",
+                        "mode": "REAL", "trade_allowed": True,
+                        "trade_expert": True}}
+        port.validate_market_symbols.return_value = {
+            "available": True, "valid": True}
+        service = SrResearchService(MagicMock(), port,
+                                    clock_service=MagicMock(),
+                                    risk_settings=MagicMock())
+        self.assertFalse(service.start(["EURUSD#"], "demo", "wrong")["ok"])
+        self.assertFalse(service.start(
+            ["EURUSD#"], "demo", "INICIAR S/R SOMENTE DEMO")["ok"])
+        port.arm_order_engine.assert_not_called()
+
+    def test_demo_signal_is_reserved_once_and_uses_shared_order_port(self):
+        with tempfile.TemporaryDirectory() as directory:
+            database = Database(Path(directory) / "sr.sqlite3")
+            port = MagicMock(terminal_id="test")
+            port.state.return_value = {
+                "connected": True, "terminal": {"trade_allowed": True},
+                "account": {"login": "123", "server": "Broker-7",
+                            "mode": "DEMO", "trade_allowed": True,
+                            "trade_expert": True, "equity": 10000}}
+            port.risk_volume.return_value = {"ok": True, "volume": 0.01}
+            port.send_demo_sr_order.return_value = {
+                "ok": True, "reconciled": True, "ticket": 12345,
+                "detail": "Posição DEMO confirmada."}
+            clock = MagicMock()
+            clock.is_currently_verified.return_value = True
+            risk = MagicMock()
+            risk.daily_check.return_value = {"ok": True, "remaining_cash": 100}
+            risk.profile.return_value = {"max_volume": 0.01}
+            risk.budget.return_value = 10
+            service = SrResearchService(database, port, clock_service=clock,
+                                        risk_settings=risk)
+            service._state.update(running=True, mode="demo")
+            service._account_sha256 = "a" * 64
+            service._account_fingerprint = "123@Broker-7"
+            signal = {"strategy": "trend_pullback", "side": "BUY",
+                      "status": "CANDIDATE_RESEARCH_ONLY", "stop": 1.09,
+                      "signal_bar_open_utc": self.decision_time - 300}
+            bundle = {"tick": {"time": self.decision_time, "ask": 1.10,
+                               "bid": 1.09998}}
+            result = {"candidates": [signal], "atr14_m5": 0.001}
+            with patch("scalperlab.sr_quant.service.time.time",
+                       return_value=self.decision_time):
+                service._maybe_execute("EURUSD#", result, bundle)
+                self.assertEqual(result["execution_status"], "CONFIRMADA_MT5")
+                service._maybe_execute("EURUSD#", result, bundle)
+            self.assertEqual(result["execution_status"], "SINAL_JA_PROCESSADO")
+            port.send_demo_sr_order.assert_called_once()
+
+    def test_audited_sr_order_rechecks_budget_without_changing_spread(self):
+        with tempfile.TemporaryDirectory() as directory:
+            database = Database(Path(directory) / "sr.sqlite3")
+            connector = MagicMock(terminal_id="test")
+            connector.state.return_value = {"connected": True, "account": {
+                "login": "123", "server": "Broker-7", "mode": "DEMO"}}
+            connector.send_demo_sr_order.return_value = {
+                "ok": True, "reconciled": True, "ticket": 12345,
+                "detail": "Posição DEMO confirmada."}
+            port = AuditedTradingPort(connector, database)
+            risk = MagicMock()
+            risk.daily_check.return_value = {"ok": True, "remaining_cash": 5}
+            risk.profile.return_value = {"max_volume": 0.01, "version": 1}
+            risk.budget.return_value = 10
+            port.risk_settings = risk
+            response = port.send_demo_sr_order(
+                "EURUSD#", "BUY", 0.01, 1.09, 1.12,
+                "123@Broker-7", 9, 0.00008, 1.5,
+                risk_policy=risk.profile.return_value)
+            self.assertTrue(response["ok"])
+            passed = connector.send_demo_sr_order.call_args.args
+            self.assertEqual(passed[6], 5)
+            self.assertEqual(passed[7], 0.00008)
 
     def test_multiframe_replay_is_read_only_and_reproducible(self):
         end = self.decision_time
