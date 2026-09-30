@@ -86,6 +86,7 @@ class WebTests(unittest.TestCase):
         page = self.client.get("/", headers=self.headers)
         self.assertEqual(page.status_code, 200)
         self.assertIn(b'id="sr-symbol-1"', page.data)
+        self.assertIn(b'id="sr-time-sample"', page.data)
         self.assertIn(b'id="sr-replay-form"', page.data)
         self.assertEqual(self.client.get("/api/sr-quant/evaluations").status_code, 403)
         response = self.client.get("/api/sr-quant/evaluations", headers=self.headers)
@@ -99,6 +100,27 @@ class WebTests(unittest.TestCase):
                                        json={"symbols": ["EURUSD#"]})
         self.assertEqual(blocked.status_code, 409)
         start.assert_not_called()
+
+    def test_sr_raw_time_sample_requires_token_and_keeps_replay_blocked(self):
+        from tests.test_sr_time_archive import sample
+        port = self.app.extensions["scalper_mt5"]
+        hour = 1_700_000_000 // 3600 * 3600
+        raw = sample(hour, hour + 3590)
+        raw["terminal_id"] = "default"
+        raw["account"] = {"login": "123", "server": "Broker-7"}
+        self.assertEqual(self.client.post("/api/sr-quant/time-sample",
+                                          json={"symbol": "EURUSD#"}).status_code, 403)
+        with patch.object(port, "market_watch_catalog", return_value={
+                "available": True, "items": [{"broker_symbol": "EURUSD#"}]}), \
+             patch.object(port, "state", return_value={
+                 "connected": True, "account": {"login": "123", "server": "Broker-7"}}), \
+             patch.object(port, "sr_raw_time_sample", return_value=raw), \
+             patch.object(port, "historical_market_data") as history:
+            response = self.client.post("/api/sr-quant/time-sample", headers=self.headers,
+                                        json={"symbol": "EURUSD#", "bars": 300})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["result"]["archived_frames"], [])
+        history.assert_not_called()
 
     def test_sr_replay_does_not_consult_mt5_when_research_active(self):
         service = self.app.extensions["scalper_sr_research"]

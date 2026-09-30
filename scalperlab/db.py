@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import sqlite3
 import zlib
@@ -146,8 +147,191 @@ class Database:
                 );
                 CREATE INDEX IF NOT EXISTS idx_sr_replay_runs_created
                     ON sr_replay_runs(created_at DESC);
+                CREATE TABLE IF NOT EXISTS sr_time_observations (
+                    account_sha256 TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    timeframe TEXT NOT NULL,
+                    raw_open INTEGER NOT NULL,
+                    utc_open INTEGER NOT NULL,
+                    offset_seconds INTEGER NOT NULL,
+                    observed_tick_utc INTEGER NOT NULL,
+                    evidence_json TEXT NOT NULL,
+                    PRIMARY KEY(account_sha256, symbol, timeframe)
+                );
+                CREATE TABLE IF NOT EXISTS sr_verified_bars (
+                    account_sha256 TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    timeframe TEXT NOT NULL,
+                    utc_open INTEGER NOT NULL,
+                    raw_open INTEGER NOT NULL,
+                    offset_seconds INTEGER NOT NULL,
+                    bar_json TEXT NOT NULL,
+                    evidence_json TEXT NOT NULL,
+                    archived_at TEXT NOT NULL,
+                    PRIMARY KEY(account_sha256, symbol, timeframe, utc_open)
+                );
+                CREATE INDEX IF NOT EXISTS idx_sr_verified_bars_lookup
+                    ON sr_verified_bars(account_sha256, symbol, timeframe, utc_open DESC);
+                CREATE TABLE IF NOT EXISTS sr_raw_time_samples (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    account_sha256 TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    captured_at TEXT NOT NULL,
+                    sample_sha256 TEXT NOT NULL,
+                    sample_zlib BLOB NOT NULL
+                );
                 """
             )
+
+    def archive_sr_time_sample(self, *, account_sha256: str, sample: dict[str, Any],
+                               save_diagnostic: bool = False) -> dict[str, Any]:
+        """Store confirmed forward bars; never reinterpret older server timestamps."""
+        from .mt5_time import MT5_TIMEFRAME_SECONDS
+        from .sr_quant.time_archive import canonical_hash, examine_sample
+
+        sample = copy.deepcopy(sample)
+        if isinstance(sample.get("account"), dict):
+            sample["account"].pop("login", None)
+        if isinstance(sample.get("terminal"), dict):
+            sample["terminal"].pop("data_path", None)
+        symbol = str(sample.get("symbol") or "")
+        if len(account_sha256) != 64 or not symbol:
+            raise ValueError("Identidade S/R inválida.")
+        evidence = examine_sample(sample)
+        if not evidence["ok"]:
+            if save_diagnostic:
+                with self.connect() as connection:
+                    connection.execute(
+                        """INSERT INTO sr_raw_time_samples
+                        (account_sha256,symbol,captured_at,sample_sha256,sample_zlib)
+                        VALUES (?,?,?,?,?)""",
+                        (account_sha256, symbol, now_iso(), canonical_hash(sample),
+                         zlib.compress(json.dumps(sample, ensure_ascii=False,
+                                                  sort_keys=True, default=str).encode(), level=6)))
+                    connection.execute(
+                        """DELETE FROM sr_raw_time_samples WHERE id NOT IN
+                        (SELECT id FROM sr_raw_time_samples ORDER BY id DESC LIMIT 60)""")
+            return {**evidence, "sample_sha256": canonical_hash(sample)}
+        current = now_iso()
+        archived = []
+        with self.connect() as connection:
+            for item in evidence["observations"]:
+                frame = item["frame"]
+                previous = connection.execute(
+                    """SELECT * FROM sr_time_observations WHERE account_sha256=?
+                    AND symbol=? AND timeframe=?""",
+                    (account_sha256, symbol, frame)).fetchone()
+                closed = item["last_closed"]
+                raw_closed = int(closed["time"])
+                if (previous and raw_closed == previous["raw_open"]
+                        and previous["offset_seconds"] == item["offset_seconds"]
+                        and (previous["utc_open"] + MT5_TIMEFRAME_SECONDS[frame]
+                             <= evidence["tick_utc"])
+                        and (previous["observed_tick_utc"]
+                             < previous["utc_open"] + MT5_TIMEFRAME_SECONDS[frame])):
+                    bar = {**closed, "raw_time": raw_closed,
+                           "time": previous["utc_open"]}
+                    prior_evidence = json.loads(previous["evidence_json"])
+                    proof = {"version": evidence["version"],
+                             "forming": prior_evidence,
+                             "closed_sample_sha256": evidence["sample_sha256"],
+                             "closed_tick_utc": evidence["tick_utc"]}
+                    existing = connection.execute(
+                        """SELECT bar_json FROM sr_verified_bars WHERE account_sha256=?
+                        AND symbol=? AND timeframe=? AND utc_open=?""",
+                        (account_sha256, symbol, frame, previous["utc_open"])).fetchone()
+                    encoded = json.dumps(bar, sort_keys=True, separators=(",", ":"))
+                    if existing and existing["bar_json"] != encoded:
+                        raise ValueError("Candles MT5 conflitantes; arquivo S/R preservado.")
+                    connection.execute(
+                        """INSERT OR IGNORE INTO sr_verified_bars
+                        (account_sha256,symbol,timeframe,utc_open,raw_open,offset_seconds,
+                         bar_json,evidence_json,archived_at) VALUES (?,?,?,?,?,?,?,?,?)""",
+                        (account_sha256, symbol, frame, previous["utc_open"], raw_closed,
+                         item["offset_seconds"], encoded,
+                         json.dumps(proof, sort_keys=True), current))
+                    archived.append(frame)
+                forming_proof = {"sample_sha256": evidence["sample_sha256"],
+                                 "tick_utc": evidence["tick_utc"],
+                                 "m1_open_raw": evidence["m1_open_raw"],
+                                 "clock_offset_seconds": evidence["clock_offset_seconds"],
+                                 "bar_offset_seconds": item["offset_seconds"],
+                                 "terminal_build": (sample.get("terminal") or {}).get("build"),
+                                 "captured_utc": sample.get("captured_utc")}
+                connection.execute(
+                    """INSERT INTO sr_time_observations
+                    (account_sha256,symbol,timeframe,raw_open,utc_open,offset_seconds,
+                     observed_tick_utc,evidence_json) VALUES (?,?,?,?,?,?,?,?)
+                    ON CONFLICT(account_sha256,symbol,timeframe) DO UPDATE SET
+                    raw_open=excluded.raw_open, utc_open=excluded.utc_open,
+                    offset_seconds=excluded.offset_seconds,
+                    observed_tick_utc=excluded.observed_tick_utc,
+                    evidence_json=excluded.evidence_json""",
+                    (account_sha256, symbol, frame, item["raw_open"], item["utc_open"],
+                     item["offset_seconds"], evidence["tick_utc"],
+                     json.dumps(forming_proof, sort_keys=True)))
+            if save_diagnostic:
+                packed = zlib.compress(json.dumps(sample, ensure_ascii=False,
+                                                   sort_keys=True, default=str).encode(), level=6)
+                connection.execute(
+                    """INSERT INTO sr_raw_time_samples
+                    (account_sha256,symbol,captured_at,sample_sha256,sample_zlib)
+                    VALUES (?,?,?,?,?)""",
+                    (account_sha256, symbol, current, evidence["sample_sha256"], packed))
+                connection.execute(
+                    """DELETE FROM sr_raw_time_samples WHERE id NOT IN
+                    (SELECT id FROM sr_raw_time_samples ORDER BY id DESC LIMIT 60)""")
+        return {"ok": True, "symbol": symbol, "sample_sha256": evidence["sample_sha256"],
+                "bar_offset_seconds": evidence["bar_offset_seconds"],
+                "archived_frames": archived}
+
+    def sr_time_archive_status(self, *, account_sha256: str, symbol: str) -> dict[str, Any]:
+        with self.connect() as connection:
+            bars = connection.execute(
+                """SELECT timeframe, COUNT(*) AS count, MIN(utc_open) AS first_utc,
+                MAX(utc_open) AS last_utc FROM sr_verified_bars
+                WHERE account_sha256=? AND symbol=? GROUP BY timeframe""",
+                (account_sha256, symbol)).fetchall()
+            samples = connection.execute(
+                """SELECT id,captured_at,sample_sha256 FROM sr_raw_time_samples
+                WHERE account_sha256=? AND symbol=? ORDER BY id DESC LIMIT 10""",
+                (account_sha256, symbol)).fetchall()
+        return {"bars": [dict(row) for row in bars],
+                "diagnostic_samples": [dict(row) for row in samples]}
+
+    def audit_sr_time_sample(self, *, account_sha256: str,
+                             sample: dict[str, Any]) -> dict[str, Any]:
+        """Compare archived recent bars with broker-raw rates; no conversion inferred."""
+        symbol = str(sample.get("symbol") or "")
+        if len(account_sha256) != 64 or not symbol:
+            raise ValueError("Identidade S/R inválida.")
+        report = {}
+        with self.connect() as connection:
+            for frame in ("M5", "M15", "H1"):
+                raw = {int(row["time"]): row
+                       for row in sample["frames"][frame]["closed"]}
+                if not raw:
+                    report[frame] = {"matched": 0, "missing": 0, "conflicts": 0}
+                    continue
+                rows = connection.execute(
+                    """SELECT raw_open,bar_json FROM sr_verified_bars WHERE
+                    account_sha256=? AND symbol=? AND timeframe=? AND raw_open BETWEEN ? AND ?""",
+                    (account_sha256, symbol, frame, min(raw), max(raw))).fetchall()
+                matched = 0
+                conflicts = 0
+                for row in rows:
+                    broker = raw.get(row["raw_open"])
+                    if broker is None:
+                        continue
+                    saved = json.loads(row["bar_json"])
+                    if all(saved.get(key) == broker.get(key)
+                           for key in ("open", "high", "low", "close", "tick_volume", "spread")):
+                        matched += 1
+                    else:
+                        conflicts += 1
+                report[frame] = {"matched": matched, "missing": len(raw) - matched - conflicts,
+                                 "conflicts": conflicts}
+        return report
 
     def save_sr_evaluation(self, *, account_sha256: str, result: dict[str, Any]) -> None:
         """Persist one research decision per closed M5 bar; never stores a login."""

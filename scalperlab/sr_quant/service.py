@@ -102,6 +102,23 @@ class SrResearchService:
                 if self._stop.is_set():
                     break
                 try:
+                    try:
+                        sampler = getattr(self.port, "sr_raw_time_sample", None)
+                        if callable(sampler):
+                            sample = sampler(symbol, 2)
+                            if (isinstance(sample, dict) and sample.get("ok")
+                                    and sample.get("symbol") == symbol
+                                    and sample.get("terminal_id") == terminal_id
+                                    and str((sample.get("account") or {}).get("login"))
+                                    == str(account["login"])
+                                    and str((sample.get("account") or {}).get("server"))
+                                    == str(account["server"])):
+                                self.database.archive_sr_time_sample(
+                                    account_sha256=expected_identity, sample=sample)
+                    except Exception as exc:
+                        self.database.save_sr_data_event(
+                            account_sha256=expected_identity, symbol=symbol,
+                            code="forward_archive_failed", detail=type(exc).__name__)
                     bundle = read_live_bundle(self.port, symbol,
                                               frame_cache=self._frame_cache)
                     if not bundle.get("ok"):

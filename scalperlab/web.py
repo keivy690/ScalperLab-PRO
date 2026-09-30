@@ -156,7 +156,8 @@ def create_app(*, database: Database | None = None, mt5: MT5Gateway | None = Non
         if request.method == "POST" and request.path in {
             "/api/settings/risk", "/api/engine/start", "/api/analyst/start",
             "/api/engine/profile", "/api/analyst/profile", "/api/sr-quant/start",
-            "/api/sr-quant/replay", "/api/sr-quant/replay-saved"}:
+            "/api/sr-quant/replay", "/api/sr-quant/replay-saved",
+            "/api/sr-quant/time-sample"}:
             risk_actions_lock.acquire()
             g.risk_action_locked = True
 
@@ -436,6 +437,50 @@ def create_app(*, database: Database | None = None, mt5: MT5Gateway | None = Non
     @app.get("/api/sr-quant/data-events")
     def sr_quant_data_events():
         return jsonify(items=app.extensions["scalper_db"].list_sr_data_events(100))
+
+    @app.post("/api/sr-quant/time-sample")
+    def sr_quant_time_sample():
+        """Capture broker-raw evidence; never certifies historical conversion."""
+        if (app.extensions["scalper_sr_research"].snapshot()["busy"]
+                or app.extensions["scalper_analyst"].snapshot()["state"].get("running")
+                or app.extensions["scalper_engine"].snapshot()["state"].get("running")):
+            return jsonify(error=(
+                "Pare os motores antes da amostra histórica; conector compartilhado.")), 409
+        data = _json_body() or {}
+        symbol = _bounded(data.get("symbol"), 32)
+        try:
+            count = int(data.get("bars", 300))
+        except (TypeError, ValueError):
+            return jsonify(error="Quantidade de candles inválida."), 400
+        if not 2 <= count <= 1000:
+            return jsonify(error="Use de 2 a 1000 candles por período."), 400
+        port = app.extensions["scalper_mt5"]
+        catalog = port.market_watch_catalog()
+        if not catalog.get("available") or symbol not in {
+                item["broker_symbol"] for item in catalog.get("items", [])}:
+            return jsonify(error="Selecione um símbolo exato do Market Watch."), 400
+        state = port.state()
+        account = state.get("account") or {}
+        if not state.get("connected") or not account.get("login") or not account.get("server"):
+            return jsonify(error="Conta MT5 indisponível."), 503
+        sample = port.sr_raw_time_sample(symbol, count)
+        if (not sample.get("ok") or sample.get("symbol") != symbol
+                or sample.get("terminal_id") != connector_terminal_id
+                or str((sample.get("account") or {}).get("login")) != str(account["login"])
+                or str((sample.get("account") or {}).get("server")) != str(account["server"])):
+            return jsonify(error=sample.get("detail") or "Identidade da amostra divergente."), 409
+        identity = hashlib.sha256(
+            f'{connector_terminal_id}:{account["login"]}@{account["server"]}'.encode()).hexdigest()
+        result = app.extensions["scalper_db"].archive_sr_time_sample(
+            account_sha256=identity, sample=sample, save_diagnostic=True)
+        if not result["ok"]:
+            return jsonify(result=result, detail=(
+                "Amostra bruta salva para diagnóstico; horário ainda não confirmado. "
+                f'Motivo: {result["code"]}.')), 200
+        return jsonify(result=result, archive=app.extensions["scalper_db"].sr_time_archive_status(
+            account_sha256=identity, symbol=symbol),
+            comparison=app.extensions["scalper_db"].audit_sr_time_sample(
+                account_sha256=identity, sample=sample)), 200
 
     @app.get("/api/sr-quant/replays")
     def sr_quant_replays():

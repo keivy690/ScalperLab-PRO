@@ -38,7 +38,7 @@ _REMOTE_METHODS = {
     "tick", "rates", "orders", "positions", "history_orders", "history_deals",
     "history_order_by_ticket", "history_deals_by_position",
     "submit_order", "state",
-    "validate_market_symbols", "strategy_market_data", "historical_market_data", "current_tick", "economic_calendar",
+    "validate_market_symbols", "strategy_market_data", "historical_market_data", "sr_raw_time_sample", "current_tick", "economic_calendar",
     "risk_volume", "arm_order_engine", "disarm_order_engine",
     "send_demo_strategy_order", "send_real_strategy_order",
     "send_demo_analyst_order", "send_real_analyst_order", "arm_demo",
@@ -53,6 +53,8 @@ _TRADE_ACTION_METHODS = {
     "place_demo_smoke_order", "close_demo_position", "close_real_position",
     "emergency_stop_demo", "emergency_stop_real",
 }
+
+_SLOW_READ_METHODS = {"sr_raw_time_sample"}
 
 
 def _connector_worker(connection: Connection, config: Any,
@@ -206,6 +208,7 @@ class ProcessMT5Connector:
             try:
                 self._connection.send((request_id, method, args, kwargs))
                 timeout = (self._trade_rpc_timeout if method in _TRADE_ACTION_METHODS
+                           else max(self._rpc_timeout, 15.0) if method in _SLOW_READ_METHODS
                            else self._rpc_timeout)
                 if not self._connection.poll(timeout):
                     self._mark_failure(f"Timeout ao aguardar resposta do conector ({method}).")
@@ -319,6 +322,10 @@ class ProcessMT5Connector:
     def historical_market_data(self, symbol_name: str, count: int = 1200,
                                timeframe: str = "M15") -> dict[str, Any]:
         ok, result = self._rpc("historical_market_data", symbol_name, count, timeframe)
+        return result if ok else {"ok": False, "detail": result}
+
+    def sr_raw_time_sample(self, symbol_name: str, count: int = 2) -> dict[str, Any]:
+        ok, result = self._rpc("sr_raw_time_sample", symbol_name, count)
         return result if ok else {"ok": False, "detail": result}
 
     def orders(self) -> dict[str, Any]:

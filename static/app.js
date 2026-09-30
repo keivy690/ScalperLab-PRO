@@ -564,6 +564,7 @@
     $("#sr-stop").disabled = !running;
     $("#sr-symbol-1").disabled = $("#sr-symbol-2").disabled = busy || !state.marketWatch?.available;
     $("#sr-replay-run").disabled = busy || conflict || !$("#sr-replay-symbol").value;
+    $("#sr-time-sample").disabled = busy || conflict || !$("#sr-symbol-1").value;
     $("#sr-replay-saved").disabled = busy || conflict;
     $("#sr-detail").textContent = `${research.detail || "Pesquisa desligada."}${research.last_cycle_at ? ` · ${new Date(research.last_cycle_at).toLocaleTimeString("pt-BR", {hour12:false})}` : ""}${conflict && !running ? " · Pare os motores de ordens para iniciar esta pesquisa." : ""}`;
     const results = research.last_results || [];
@@ -599,6 +600,25 @@
       const result = await api("/api/sr-quant/stop", {method:"POST", body:"{}", timeoutMs:15000});
       toast(result.detail, "success"); await refresh();
     } catch (error) { toast(error.message, "error"); }
+  }
+
+  async function collectSrTimeSample() {
+    const symbol = $("#sr-symbol-1").value;
+    const button = $("#sr-time-sample");
+    if (!symbol) return;
+    button.disabled = true;
+    $("#sr-time-status").textContent = `Lendo timestamps brutos de ${symbol}; nenhuma ordem será enviada.`;
+    try {
+      const response = await api("/api/sr-quant/time-sample", {
+        method:"POST", body:JSON.stringify({symbol, bars:300}), timeoutMs:30000});
+      const result = response.result || {};
+      const comparison = response.comparison || {};
+      const frames = Object.entries(comparison).map(([name, row]) =>
+        `${name}: ${row.matched || 0} conferido(s), ${row.conflicts || 0} divergente(s)`).join(" · ");
+      $("#sr-time-status").textContent = response.detail ||
+        `Amostra ${result.sample_sha256 || "—"} salva. ${frames || "Arquivo progressivo ainda sem barras fechadas."} O replay continua exigindo histórico UTC comprovado.`;
+    } catch (error) { $("#sr-time-status").textContent = error.message; toast(error.message, "error"); }
+    finally { renderSrResearch(state.snapshot?.sr_research || {}); }
   }
 
   function renderSrReplayReport(result) {
@@ -1481,6 +1501,7 @@
   $("#analyst-stop").addEventListener("click", stopAnalyst);
   $("#sr-start").addEventListener("click", startSrResearch);
   $("#sr-stop").addEventListener("click", stopSrResearch);
+  $("#sr-time-sample").addEventListener("click", collectSrTimeSample);
   $("#sr-symbol-1").addEventListener("change", () => renderSrResearch(state.snapshot?.sr_research || {}));
   $("#sr-replay-symbol").addEventListener("change", () => renderSrResearch(state.snapshot?.sr_research || {}));
   $("#sr-replay-form").addEventListener("submit", runSrReplay);

@@ -18,7 +18,7 @@
 | Relógio | `POST /api/system/clock/synchronize` | Leitura ou sincronização manual conforme parâmetro; mutação de horário é recusada durante execução |
 | Analista SMA21 | `GET/POST /api/analyst/profile`; `POST /api/analyst/start`, `/api/analyst/stop`, `/api/analyst/replay`, `/api/analyst/replay-saved` | Perfil, modos e replay próprio |
 | Estratégias | `GET/POST /api/engine/profile`; `POST /api/engine/start`, `/api/engine/stop`; `/api/strategies` | Motor declarativo e catálogo revisado |
-| S/R Quant | `POST /api/sr-quant/start`, `/api/sr-quant/stop`, `/api/sr-quant/replay`, `/api/sr-quant/replay-saved`; `GET /api/sr-quant/evaluations`, `/api/sr-quant/data-events`, `/api/sr-quant/replays` | Pesquisa e replay somente leitura; nenhuma rota de envio |
+| S/R Quant | `POST /api/sr-quant/start`, `/api/sr-quant/stop`, `/api/sr-quant/replay`, `/api/sr-quant/replay-saved`, `/api/sr-quant/time-sample`; `GET /api/sr-quant/evaluations`, `/api/sr-quant/data-events`, `/api/sr-quant/replays` | Pesquisa, replay e coleta bruta somente leitura; nenhuma rota de envio. A amostra requer motores parados e não libera conversão histórica sem evidência |
 | Ordens e auditoria | `GET /api/orders`, `GET /api/trading/audit`, `POST /api/trading/audit/reconcile`, rotas de armamento/fechamento | Estado real, tentativas e reconciliação; consulta de auditoria não reenvia ordens |
 | Fontes | `/api/research/search`, `/import-url`, `/feeds`, `/summarize` | Coleta e resumo opcional de material público |
 

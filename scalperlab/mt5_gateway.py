@@ -600,6 +600,63 @@ class MT5Gateway:
         return self.strategy_market_data(symbol_name, count, timeframe, require_fresh=False)
 
     @_terminal_serialized
+    def sr_raw_time_sample(self, symbol_name: str, count: int = 2) -> dict[str, Any]:
+        """Read raw MT5 rate timestamps for S/R research, without changing the trading path."""
+        if not 1 <= int(count) <= 1000:
+            return {"ok": False, "code": "invalid_count",
+                    "detail": "Use de 1 a 1000 barras por período."}
+        symbol_name = self.resolve_broker_symbol(symbol_name)
+        mt5 = self._connect()
+        if mt5 is None:
+            return {"ok": False, "code": "terminal_unavailable",
+                    "detail": self.last_error or "MT5 indisponível."}
+        try:
+            before = mt5.account_info()
+            terminal = mt5.terminal_info()
+            symbol = mt5.symbol_info(symbol_name)
+            if (not before or not terminal or not getattr(terminal, "connected", False)
+                    or not symbol or not symbol.visible or symbol.name != symbol_name):
+                return {"ok": False, "code": "identity_or_symbol_unavailable",
+                        "detail": "Conta, terminal ou símbolo exato do Market Watch indisponível."}
+            tick = self.current_tick(symbol_name)
+            if not tick.get("ok"):
+                return tick
+            frames = {}
+            for frame in ("M1", "M5", "M15", "H1"):
+                frame_id = getattr(mt5, f"TIMEFRAME_{frame}")
+                rates = mt5.copy_rates_from_pos(symbol_name, frame_id, 0, int(count) + 1)
+                if rates is None or len(rates) < 2:
+                    return {"ok": False, "code": "raw_rates_unavailable",
+                            "detail": f"Barras brutas {frame} indisponíveis."}
+                rows = [{"time": int(row["time"]), "open": float(row["open"]),
+                         "high": float(row["high"]), "low": float(row["low"]),
+                         "close": float(row["close"]),
+                         "tick_volume": int(row["tick_volume"]),
+                         "spread": int(row["spread"]),
+                         "real_volume": int(row["real_volume"])} for row in rates]
+                if any(a["time"] >= b["time"]
+                       for a, b in zip(rows, rows[1:], strict=False)):
+                    return {"ok": False, "code": "raw_rates_sequence",
+                            "detail": f"Barras brutas {frame} duplicadas ou fora de ordem."}
+                frames[frame] = {"closed": rows[:-1], "forming": rows[-1]}
+            after = mt5.account_info()
+            after_terminal = mt5.terminal_info()
+            if (not after or not after_terminal or not getattr(after_terminal, "connected", False)
+                    or (before.login, before.server) != (after.login, after.server)
+                    or getattr(terminal, "data_path", None)
+                    != getattr(after_terminal, "data_path", None)):
+                return {"ok": False, "code": "identity_changed",
+                        "detail": "Conta ou terminal mudou durante a amostra; dados descartados."}
+            return {"ok": True, "symbol": symbol_name, "terminal_id": self.terminal_id,
+                    "account": {"login": str(before.login), "server": str(before.server)},
+                    "terminal": {"data_path": str(getattr(terminal, "data_path", "")),
+                                 "build": int(getattr(terminal, "build", 0))},
+                    "captured_utc": int(time.time()), "tick": tick, "frames": frames}
+        except (AttributeError, KeyError, TypeError, ValueError) as exc:
+            return {"ok": False, "code": "raw_sample_failed",
+                    "detail": f"Falha na amostra bruta: {type(exc).__name__}."}
+
+    @_terminal_serialized
     def current_tick(self, symbol_name: str) -> dict[str, Any]:
         symbol_name = self.resolve_broker_symbol(symbol_name)
         mt5 = self._connect()

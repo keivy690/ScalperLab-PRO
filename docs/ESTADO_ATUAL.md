@@ -11,7 +11,7 @@
 | Calendário | CalendarService MQL5 publica eventos recentes vinculados à conta/servidor | Contexto parcial e informativo no modo técnico/quantitativo; não é feed de notícias nem viés fundamental completo |
 | Analista | Heurística SMA21 com leitura técnica/quantitativa, observação, execução condicionada DEMO/REAL e replay OHLC próprio | Regra experimental; replay ainda não equivale a ticks reais ou validação estatística; REAL não homologado |
 | Estratégias | Cinco adaptadores declarativos; revisão/aprovação; observação e envio condicionado | Arquivos importados são revisados, nunca executados automaticamente; estudos originais não validam a adaptação |
-| S/R Quant | Pesquisa H1/M15/M5 opcional de pullback em tendência, breakout com reteste e falso rompimento lateral; avaliações persistidas; replay 70/30 e reprodução offline | Sempre `research_only`, `order_eligible=false`; sem envio. Na leitura XMGlobal de 29/09, H1 e a base histórica UTC não foram confirmados, logo pesquisa/replay reais não tiveram aceite |
+| S/R Quant | Pesquisa H1/M15/M5 opcional de pullback em tendência, breakout com reteste e falso rompimento lateral; avaliações persistidas; replay 70/30 e reprodução offline; coleta bruta e arquivo progressivo de horário adicionados em 30/09 | Sempre `research_only`, `order_eligible=false`; sem envio. Na leitura XMGlobal de 29/09, H1 e a base histórica UTC não foram confirmados. A coleta/arquivo novos ainda não foram verificados contra um terminal aberto nesta revisão; não liberam replay real |
 | Lote, risco e ordens | Perfis persistidos por motor, três modos de dimensionamento, margem reservada, limite diário por conta/dia UTC, `order_check`, auditoria e reconciliação | Estimativas não capturam todos os custos/gaps. Status de modo armado não confirma ordem; confirmação requer posição correlacionada no MT5 |
 | Pesquisa de fontes | GitHub, RSS/Atom, importação de URL; Brave/YouTube/IA opcionais por chave | Conteúdo público exige revisão humana. Notícias e séries macro estruturadas não alimentam as decisões atuais |
 | Pacote | Script PyInstaller `onedir` e instalação assistida de ClockService/CalendarService | O piloto datado anteriormente não foi reconstruído nem aceito nesta revisão; não afirmar que contém S/R Quant sem novo manifesto/build |
@@ -28,7 +28,7 @@ O S/R Quant participa apenas de pesquisa e replay. Não entra no passo 3 nem no 
 
 ## Pendências com efeito prático
 
-1. **Histórico temporal do broker:** obter e validar, para o servidor usado, a regra histórica de UTC e horário sazonal; confrontar H1/M15/M5 e ticks em transições. O ClockService publica apenas o offset corrente. Até lá, manter falha fechada do S/R Quant.
+1. **Histórico temporal do broker:** a [coleta e o arquivo progressivo](VALIDACAO_TEMPO_HISTORICO_SR.md) já estão implementados; ainda falta obter e validar a regra histórica do servidor e confrontar H1/M15/M5 e ticks nas transições. O ClockService publica apenas o offset corrente. Até lá, manter falha fechada do S/R Quant.
 2. **Evidência estatística:** executar replay S/R com histórico do broker confiável, custos base/adversos e janela reservada; comparar com baseline e, depois, ticks reais ou Strategy Tester. A implementação em código e testes sintéticos não demonstram rentabilidade.
 3. **Dados fundamentais:** contratar/ligar provedores de notícias e séries macro adequados à classe de ativo, com licença, proveniência, timestamp, cobertura, revisão e estado de indisponibilidade. Calendário sozinho é parcial.
 4. **Pacote atualizado:** reconstruir o `onedir` a partir da revisão aprovada e validar o manifesto, os dois Services, o conector e persistência em outra instalação Windows. Não confundir código atualizado com executável já distribuível.
@@ -40,4 +40,5 @@ O S/R Quant participa apenas de pesquisa e replay. Não entra no passo 3 nem no 
 - [Arquitetura](ARCHITECTURE.md): contratos e caminho de dados.
 - [Segurança e limites](SAFETY_AND_LIMITS.md): condições de bloqueio e envio.
 - [Implementação S/R Quant](IMPLEMENTACAO_SR_QUANT_2026-09-29.md): o que foi observado na entrega.
+- [Validação do tempo histórico S/R](VALIDACAO_TEMPO_HISTORICO_SR.md): coleta bruta, arquivo progressivo e critérios para uma futura conversão versionada.
 - Planos, estudos e relatórios com data conservam o estado daquela data. Um item marcado “proposta” ou “pendente” não vira recurso apenas por constar de um plano.
